@@ -1,0 +1,231 @@
+2019-11-05  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 3.0 released.
+
+	* Licensing: Changed license from GPLv3+ to GPLv2+.
+
+	* Build system: Support Meson.
+
+2018-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.8 released.
+
+	* Debugging: Hex dumps for SPI traffic can be enabled via command line
+	  option (--dump-traffic).
+
+2018-07-12  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.7 released.
+
+	* Statistics: Overall program statistics are gathered now (if
+	  requested) and can be dumped to the log. The program measures the
+	  time spent in various parts of the program, and gathers I/O
+	  statistics. Statistics can be reset at any time, and a nice report
+	  can be dumped to the log when needed.
+
+	  By default, statistics are *not* gathered because overflowing the
+	  statistics counters will generate tons of warnings in the log. To
+	  change this default, the command line option --stats may be used.
+	  This way, statistics can be gathered during the boot process as
+	  well.
+
+	  We still use UNIX signals to control dcpspi, so here is a bunch of
+	  new signals now handled by dcpspi:
+	  - SIGRTMIN+9  - Stop gathering statistics.
+	  - SIGRTMIN+10 - Resume gathering statistics.
+	  - SIGRTMIN+11 - Dump statistics to log.
+	  - SIGRTMIN+12 - Dump statistics to log and reset all figures.
+
+	* Debugging: Emit a log message in case the SPI slave has deasserted
+	  the request pin before the corresponding transaction is about to be
+	  processed. This can happen in case the request pin is deasserted and
+	  then asserted again while a transaction is in progress (creating a
+	  pending transaction), and then the pin is deasserted before the
+	  pending transaction is started to be processed (possibly due to a
+	  timeout or other circumstances in the SPI slave).
+
+	* Debugging: Improved log message in case the SPI slave asserts the
+	  request pin for a "long" time. The confusing message "Ignoring data
+	  from DCPD until slave deasserts request pin" is now a pair of
+	  messages: "Waiting for slave to deassert the request pin" and
+	  "Slave has deasserted the request pin".
+
+	* Misc: Configure script attempts to enable C++11 mode for C++
+	  compiler (for unit tests).
+
+2018-03-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.6 released. Functionality unchanged, only build system is
+	  affected.
+
+	* Misc: Do not error out if markdown is not installed.
+
+2018-01-26  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.5 released.
+
+	* Debugging: Hex dumps for SPI traffic can be enabled/disabled
+	  independently of global verbosity level. Use RTMIN+8 to enable
+	  dumping of traffic, and RTMIN+7 to disable.
+
+2017-10-23  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.4 released.
+
+	* Debugging: Improved hex dumps (resembling "hexdump -C") for a nicer
+	  debugging experience.
+
+2016-11-25  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.3 released.
+
+	* Debugging: Log all SPI traffic as hex dump at highest verbosity
+	  level.
+
+	* Debugging: Allow setting verbosity level via Unix signal.
+
+2016-10-24  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.2 released.
+
+	* Performance: Reduced amount of log messages to a bare minimum.
+	  Typically, dcpspi will only emit its version information and tell
+	  when it's ready to accept traffic.
+
+	* Logging: The verbosity can be specified from the command line now,
+	  so despite reduced amount of logs, debugging is easier now.
+
+2016-07-21  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.1 released.
+
+	* Performance: Reduce amount of log messages to spare CPU cycles. This
+	  is supposed to avoid stuttering audio playback at the start of
+	  streams.
+
+2016-06-28  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.0 released.
+
+	* Communication with dcpd: Major changes in the protocol between
+	  dcpspi and dcpd. A small protocol has been added that encapsulates
+	  DCP to get collision handling and synchronization right.
+
+	  Also, dcpspi does not attempt to keep track of read commands and
+	  their corresponding answers because this was another root of many
+	  problems. It is not required to keep them related, contrary to
+	  assumptions made in 1.x versions.
+
+	* GPIO: Detect small peaks, always use poll(2) before sampling. There
+	  were several problems that could be traced down to the way the GPIO
+	  was read out.
+
+	* Dummy mode: Fixed so that it works again (was broken in v1.11).
+
+2016-05-23  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.11 released.
+
+	* Protocol: Fix collision handling.
+
+2016-03-04  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.10 released.
+
+	* Logging: Reduce number of log messages emitted for each transaction.
+
+2016-02-19  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.9 released.
+
+	* Protocol: Fixed message corruption during collision handling.
+
+2016-02-12  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.8 released.
+
+	* Bug fix: Avoid log disruption by very long messages.
+
+2016-02-11  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.7 released.
+
+	* SPI interface: Decreased default clock frequency from 1 MHz to
+	  900 kHz to avoid spurious communication problems.
+
+2016-01-14  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.6 released.
+
+	* Protocol: Fix handling of escape sequences in collisions.
+
+	* GPIO: Wait longer for sysfs files to become accessible. During boot,
+	  the system is very busy; it can take udev much longer to configure
+	  sysfs permissions than we've been expecting in v1.5.
+
+2015-12-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.5 released.
+
+	* Protocol: Fix race condition in collision detection.
+
+	  The protocol was slightly extended such that the SPI slave is now
+	  expected to send a zero byte when it is ready to receive data from
+	  the master, and a NOP when it's not. Anything else is considered
+	  protocol data, indicating a collision, and is fed into the SPI input
+	  buffer.
+
+	  Collisions like these are bound to happen sometimes because it is
+	  simply impossible for the slave to tell that a master transaction is
+	  about to begin. For the master it is equally impossible to check the
+	  request line and start a master SPI transaction at exactly the same
+	  time, so for a small time window there is a chance for a collision
+	  to happen.
+
+	* Protocol: Request GPIO is checked before starting to poll the slave
+	  device. This reduces the amount of unnecessary polling during a
+	  collision.
+
+	* Testing: Add command line option to enable dummy mode for testing on
+	  PCs (no SPI nor GPIO accesses are being made in this mode). Pass a
+	  dash to the --spidev option to enable dummy mode.
+
+2015-11-17  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.4 released.
+
+	* SPI interface: Increased clock frequency from 128 kHz to 1 MHz,
+	  resulting in a speed-up of transfers by a factor of more than 7.8.
+
+	* SPI transactions: Slave poll interval reduced from 30 ms to 5 ms,
+	  resulting in vastly improved latencies.
+
+2015-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.3 released.
+
+	* Slave transactions: Better input sanitation, do not accept
+	  transaction sizes bigger than 256.
+
+2015-07-13  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.2 released.
+
+	* Show version information in log, add --version option.
+
+	* Fix SPI collision and repeated requests handling.
+
+2015-06-30  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.1 released.
+
+	* Reduce SPI traffic while waiting for slave.
+
+2015-06-11  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.0 released.
+
+	* First release for testing.
+
+
+Copyright 2015, 2016, 2017, 2018, 2019 T+A elektroakustik GmbH & Co. KG

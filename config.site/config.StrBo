@@ -1,0 +1,6 @@
+# vi:syntax=sh
+CFLAGS="-std=c11 -fstrict-aliasing $CFLAGS"
+
+CWARNINGS="-Wall -Waggregate-return -Wcast-qual -Wclobbered -Wsign-compare -Wuninitialized -Wunused-but-set-parameter -Wunused-function -Wundef -Wshadow -Winline -Wpointer-arith -Wfloat-equal -Wwrite-strings -Wstrict-aliasing -Wbad-function-cast -Wnested-externs -Wmissing-prototypes -Wstrict-prototypes -Wdouble-promotion"
+
+export CWARNINGS
