@@ -185,7 +185,7 @@ static uint16_t get_dcp_data_size(const uint8_t *dcp_header)
 
     if(command_type == DCP_COMMAND_MULTI_WRITE_REGISTER ||
        command_type == DCP_COMMAND_MULTI_READ_REGISTER)
-        return (dcp_header[2] << 16) | dcp_header[3];
+        return dcp_header[2] | (dcp_header[3] << 8);
     else
         return 0;
 }
