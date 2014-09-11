@@ -21,7 +21,7 @@ int fifo_create_and_open(const char *devname, bool write_not_read)
         }
     }
 
-    ret = open(devname, (write_not_read ? O_WRONLY : O_RDONLY | O_NONBLOCK));
+    ret = open(devname, write_not_read ? O_WRONLY : (O_RDONLY | O_NONBLOCK));
 
     if(ret < 0)
         msg_error(errno, LOG_EMERG,
