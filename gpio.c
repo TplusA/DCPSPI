@@ -141,8 +141,7 @@ static int hook_to_gpio(unsigned int num)
     }
 
     /* dummy read to flush the current value */
-    ssize_t bytes;
-    while((bytes = read(fd, buffer, sizeof(buffer))) == -1 && errno == EINTR)
+    while(read(fd, buffer, sizeof(buffer)) == -1 && errno == EINTR)
         ;
     lseek(fd, 0, SEEK_SET);
 

@@ -191,6 +191,17 @@ static uint16_t get_dcp_data_size(const uint8_t *dcp_header)
         return 0;
 }
 
+static size_t compute_read_size(const struct dcp_transaction *transaction)
+{
+    size_t read_size =
+        transaction->dcp_buffer.size - transaction->dcp_buffer.pos;
+
+    if(read_size > transaction->pending_size_of_transaction)
+        read_size = transaction->pending_size_of_transaction;
+
+    return read_size;
+}
+
 static void process_transaction(struct dcp_transaction *transaction,
                                 int fifo_in_fd, int fifo_out_fd, int spi_fd,
                                 bool request_active)
@@ -276,23 +287,18 @@ static void process_transaction(struct dcp_transaction *transaction,
         printf("Master transaction, need to receive %u bytes from DCP\n",
                transaction->pending_size_of_transaction);
 
-        size_t read_size =
-            transaction->dcp_buffer.size - transaction->dcp_buffer.pos;
-
-        if(read_size > transaction->pending_size_of_transaction)
-            read_size = transaction->pending_size_of_transaction;
-
-        read_size =
+        const size_t read_size = compute_read_size(transaction);
+        const int bytes_read =
             fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
 
-        if(read_size < 0)
+        if(bytes_read < 0)
         {
             printf("Master transaction comm broken\n");
             reset_transaction(transaction);
             break;
         }
 
-        transaction->pending_size_of_transaction -= read_size;
+        transaction->pending_size_of_transaction -= (size_t)bytes_read;
         printf("still pending %u\n", transaction->pending_size_of_transaction);
 
         if(transaction->pending_size_of_transaction == 0 ||
