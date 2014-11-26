@@ -1,0 +1,19 @@
+Source: dcpspi
+Maintainer: Robert Tiemann <r.tiemann@ta-hifi.de>
+Section: sound
+Priority: optional
+Build-Depends: debhelper
+Standards-Version: 3.9.6
+Homepage: http://www.ta-hifi.de/
+
+Package: dcpspi
+Architecture: @DEBIAN_ARCHITECTURE_NAME@
+Recommends: dcpd
+Depends: libc6
+Description: DCP over SPI transport daemon
+ A daemon that implements DCP over SPI as an SPI master. This is basically a
+ low-level protocol driver implemented in userspace.
+ .
+ Note that this daemon is only a temporary solution with a lot of problems due
+ to its nature as a userspace program. For more robustness and efficiency, it
+ should really be replaced by a kernel driver.

@@ -1,5 +1,9 @@
-/cscope.out
-/tags
-/dcpspi
 /README.html
-*.o
+/aclocal.m4
+/autom4te.cache/
+/config.h.in
+/config.h.in~
+/config/
+/configure
+/m4/
+Makefile.in

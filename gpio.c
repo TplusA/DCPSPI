@@ -1,4 +1,6 @@
-#define _XOPEN_SOURCE 500
+#if HAVE_CONFIG_H
+#include <config.h>
+#endif /* HAVE_CONFIG_H */
 
 #include <stdint.h>
 #include <stdbool.h>
