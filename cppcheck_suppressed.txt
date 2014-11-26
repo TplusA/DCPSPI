@@ -1,1 +1,2 @@
+variableHidingTypedef:/usr/lib/gcc/x86_64-linux-gnu/4.8/include/stdarg.h:78
 variableHidingTypedef:/usr/include/stdio.h:79
