@@ -253,7 +253,7 @@ static void process_transaction(struct dcp_transaction *transaction,
         assert(transaction->pending_size_of_transaction == 0);
 
         fill_spi_buffer_from_dcp(transaction);
-        printf("Master transaction, send %u bytes over SPI (were %u bytes)\n",
+        printf("Master transaction, send %zu bytes over SPI (were %zu bytes)\n",
                transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
         if(spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
                            transaction->spi_buffer.pos) < 0)
@@ -339,7 +339,7 @@ static void process_transaction(struct dcp_transaction *transaction,
         /* fall-through */
 
       case TSTATE_MASTER_FLUSH_TO_DCP:
-        printf("Master transaction, send %u bytes answer to DCP (%u pending)\n",
+        printf("Master transaction, send %zu bytes answer to DCP (%u pending)\n",
                transaction->dcp_buffer.pos,
                transaction->pending_size_of_transaction);
 
@@ -384,7 +384,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TSTATE_SLAVE_FLUSH_TO_DCP:
         /* TODO: not implemented */
-        printf("Slave transaction, send %u bytes over named pipe (were %u bytes)\n",
+        printf("Slave transaction, send %zu bytes over named pipe (were %zu bytes)\n",
                transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
         break;
 
