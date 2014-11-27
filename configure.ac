@@ -16,7 +16,6 @@ AC_ARG_VAR([DEBIAN_SYSROOT_LIBPATH], [colon-separated list of paths to search fo
 # Checks for programs.
 AC_PROG_CC
 AM_PROG_AR
-PKG_PROG_PKG_CONFIG([0.26])
 AC_CHECK_PROGS([MARKDOWN], [markdown])
 AC_CHECK_PROGS([DOXYGEN], [doxygen])
 AC_CHECK_PROGS([DPKG_BUILDPACKAGE], [dpkg-buildpackage])
