@@ -24,21 +24,25 @@
  */
 enum transaction_state
 {
-    TSTATE_NONE = 0,               /*!< Idle, waiting for activities. */
+    TR_IDLE = 0,                                    /*!< Idle, waiting for activities. */
 
-    TSTATE_MASTER_READ_REQ_HEADER, /*!< Reading header from DCP process. */
-    TSTATE_MASTER_READ_REQ_DATA,   /*!< Reading request from DCP process. */
-    TSTATE_MASTER_FLUSH_TO_SLAVE,  /*!< Sending request to slave over SPI. */
-    TSTATE_MASTER_READ_ANS_HEADER, /*!< Reading header from slave over SPI. */
-    TSTATE_MASTER_READ_ANS_DATA,   /*!< Reading answer from slave over SPI. */
-    TSTATE_MASTER_FLUSH_TO_DCP,    /*!< Sending answer to DCP process. */
+    /* master transactions */
+    TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD,  /*!< Reading header from DCP process. */
+    TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD,    /*!< Reading data from DCP process. */
+    TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE,         /*!< Sending write request to slave over SPI. */
 
-    TSTATE_SLAVE_READ_REQ_HEADER,  /*!< Reading header from slave over SPI. */
-    TSTATE_SLAVE_READ_REQ_DATA,    /*!< Reading request from slave over SPI. */
-    TSTATE_SLAVE_FLUSH_TO_DCP,     /*!< Sending request to DCP process. */
-    TSTATE_SLAVE_READ_ANS_HEADER,  /*!< Reading header from DCP process. */
-    TSTATE_SLAVE_READ_ANS_DATA,    /*!< Reading answer from DCP process. */
-    TSTATE_SLAVE_FLUSH_TO_SLAVE,   /*!< Sending answer to slave over SPI. */
+    /* slave transactions */
+    TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE,       /*!< Reading header from slave over SPI. */
+
+    /* for slave write commands */
+    TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE,    /*!< Reading data from slave over SPI. */
+    TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD,           /*!< Sending write request to DCP process. */
+
+    /* for slave read commands */
+    TR_SLAVE_READCMD_FORWARDING_TO_DCPD,            /*!< Sending read request to DCP process. */
+    TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD,    /*!< Reading header from DCP process. */
+    TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD,      /*!< Reading data from DCP process. */
+    TR_SLAVE_READCMD_FORWARDING_TO_SLAVE,           /*!< Sending answer to slave over SPI. */
 };
 
 /*!
@@ -70,11 +74,11 @@ struct dcp_transaction
  */
 static bool expecting_dcp_data(const struct dcp_transaction *transaction)
 {
-    return (transaction->state == TSTATE_NONE ||
-            transaction->state == TSTATE_MASTER_READ_REQ_HEADER ||
-            transaction->state == TSTATE_MASTER_READ_REQ_DATA ||
-            transaction->state == TSTATE_SLAVE_READ_ANS_HEADER ||
-            transaction->state == TSTATE_SLAVE_READ_ANS_DATA);
+    return (transaction->state == TR_IDLE ||
+            transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD ||
+            transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD ||
+            transaction->state == TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD ||
+            transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD);
 }
 
 /*!
@@ -170,7 +174,7 @@ static void reset_transaction(struct dcp_transaction *transaction)
 {
     printf("## Reset transaction\n");
 
-    transaction->state = TSTATE_NONE;
+    transaction->state = TR_IDLE;
 
     clear_buffer(&transaction->dcp_buffer);
     transaction->pending_size_of_transaction = 0;
@@ -178,9 +182,22 @@ static void reset_transaction(struct dcp_transaction *transaction)
     clear_buffer(&transaction->spi_buffer);
 }
 
+static uint8_t get_dcp_command_type(uint8_t dcp_header_first_byte)
+{
+    return dcp_header_first_byte & 0x0f;
+}
+
+static bool is_read_command(const uint8_t *dcp_header)
+{
+    const uint8_t command_type = get_dcp_command_type(dcp_header[0]);
+
+    return (command_type == DCP_COMMAND_READ_REGISTER ||
+            command_type == DCP_COMMAND_MULTI_READ_REGISTER);
+}
+
 static uint16_t get_dcp_data_size(const uint8_t *dcp_header)
 {
-    const uint8_t command_type = dcp_header[0] & 0x0f;
+    const uint8_t command_type = get_dcp_command_type(dcp_header[0]);
 
     printf("0x%02x 0x%02x\n", dcp_header[0], command_type);
 
@@ -202,39 +219,113 @@ static size_t compute_read_size(const struct dcp_transaction *transaction)
     return read_size;
 }
 
+static const char *tr_log_prefix(enum transaction_state state)
+{
+    switch(state)
+    {
+      case TR_IDLE:
+        return "No transaction";
+
+      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
+        return "Master write transaction";
+
+      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
+        return "Slave transaction";
+
+      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
+      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
+        return "Slave write transaction";
+
+      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
+      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
+        return "Slave read transaction";
+    }
+
+    return "INVALID transaction";
+}
+
+static void process_transaction_receive_data(struct dcp_transaction *transaction,
+                                             int fifo_in_fd, int spi_fd)
+{
+    const char *read_peer =
+        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
+    const char *write_peer =
+        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "DCPD" : "slave";
+
+    printf("%s: need to receive %u bytes from %s\n",
+           tr_log_prefix(transaction->state),
+           transaction->pending_size_of_transaction, read_peer);
+
+    const size_t read_size = compute_read_size(transaction);
+    const int bytes_read =
+        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
+        ? spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer, read_size, 100)
+        : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
+
+    if(bytes_read < 0)
+    {
+        printf("%s: communication with %s broken\n",
+               tr_log_prefix(transaction->state), read_peer);
+        reset_transaction(transaction);
+        return;
+    }
+
+    transaction->pending_size_of_transaction -= (size_t)bytes_read;
+    printf("%s: still pending %u\n", tr_log_prefix(transaction->state),
+           transaction->pending_size_of_transaction);
+
+    if(transaction->pending_size_of_transaction == 0 ||
+       is_buffer_full(&transaction->dcp_buffer))
+    {
+        printf("%s: flush buffer to %s\n", tr_log_prefix(transaction->state), write_peer);
+        if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD)
+            transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
+        else if(transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD)
+            transaction->state = TR_SLAVE_READCMD_FORWARDING_TO_SLAVE;
+        else
+            transaction->state = TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD;
+    }
+}
+
 static void process_transaction(struct dcp_transaction *transaction,
                                 int fifo_in_fd, int fifo_out_fd, int spi_fd,
-                                bool request_active)
+                                bool is_slave_request)
 {
     switch(transaction->state)
     {
-      case TSTATE_NONE:
-        if(request_active)
+      case TR_IDLE:
+        if(is_slave_request)
         {
-            printf("Starting slave transaction\n");
-            transaction->state = TSTATE_SLAVE_READ_REQ_HEADER;
+            transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
+            msg_info("%s: begin", tr_log_prefix(transaction->state));
             break;
         }
 
-        printf("Starting master transaction\n");
-        transaction->state = TSTATE_MASTER_READ_REQ_HEADER;
+        transaction->state = TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD;
+        msg_info("%s: begin (assuming write command)", tr_log_prefix(transaction->state));
 
         /* fall-through */
 
-      case TSTATE_MASTER_READ_REQ_HEADER:
-        printf("Master transaction header\n");
+      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
+        printf("%s: receiving command header\n", tr_log_prefix(transaction->state));
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
                                DCP_HEADER_SIZE - transaction->dcp_buffer.pos,
                                fifo_in_fd) < 0)
         {
-            printf("Master transaction header comm broken\n");
+            printf("%s: communication with DCPD broken\n", tr_log_prefix(transaction->state));
             reset_transaction(transaction);
             break;
         }
 
         if(transaction->dcp_buffer.pos != DCP_HEADER_SIZE)
         {
-            printf("Master transaction header incomplete, waiting for more input\n");
+            printf("%s: header incomplete, waiting for more input\n",
+                   tr_log_prefix(transaction->state));
             break;
         }
 
@@ -244,27 +335,34 @@ static void process_transaction(struct dcp_transaction *transaction,
          * the receiver of the data. We simply assume that we have a header
          * here and that the length can be determined.
          */
-        printf("Master transaction header received\n");
+        printf("%s: command header received\n", tr_log_prefix(transaction->state));
+
         transaction->pending_size_of_transaction =
             get_dcp_data_size(transaction->dcp_buffer.buffer);
 
-        printf("pending %u\n", transaction->pending_size_of_transaction);
-
         if(transaction->pending_size_of_transaction > 0)
         {
-            transaction->state = TSTATE_MASTER_READ_REQ_DATA;
+            if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD)
+                transaction->state = TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD;
+            else
+                transaction->state = TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD;
             break;
         }
 
-        transaction->state = TSTATE_MASTER_FLUSH_TO_SLAVE;
+        if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD)
+            transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
+        else
+            transaction->state = TR_SLAVE_READCMD_FORWARDING_TO_SLAVE;
 
         /* fall-through */
 
-      case TSTATE_MASTER_FLUSH_TO_SLAVE:
+      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
+      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
         assert(transaction->pending_size_of_transaction == 0);
 
         fill_spi_buffer_from_dcp(transaction);
-        printf("Master transaction, send %zu bytes over SPI (were %zu bytes)\n",
+        printf("%s: send %zu bytes over SPI (were %zu bytes)\n",
+               tr_log_prefix(transaction->state),
                transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
         if(spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
                            transaction->spi_buffer.pos) < 0)
@@ -273,45 +371,12 @@ static void process_transaction(struct dcp_transaction *transaction,
             break;
         }
 
-        clear_buffer(&transaction->spi_buffer);
-        clear_buffer(&transaction->dcp_buffer);
-
-        if(transaction->pending_size_of_transaction == 0)
-            transaction->state = TSTATE_MASTER_READ_ANS_HEADER;
-        else
-            transaction->state = TSTATE_MASTER_READ_REQ_DATA;
-
+        printf("%s: DONE\n", tr_log_prefix(transaction->state));
+        reset_transaction(transaction);
         break;
 
-      case TSTATE_MASTER_READ_REQ_DATA:
-        printf("Master transaction, need to receive %u bytes from DCP\n",
-               transaction->pending_size_of_transaction);
-
-        const size_t read_size = compute_read_size(transaction);
-        const int bytes_read =
-            fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
-
-        if(bytes_read < 0)
-        {
-            printf("Master transaction comm broken\n");
-            reset_transaction(transaction);
-            break;
-        }
-
-        transaction->pending_size_of_transaction -= (size_t)bytes_read;
-        printf("still pending %u\n", transaction->pending_size_of_transaction);
-
-        if(transaction->pending_size_of_transaction == 0 ||
-           is_buffer_full(&transaction->dcp_buffer))
-        {
-            printf("flush buffer to SPI\n");
-            transaction->state = TSTATE_MASTER_FLUSH_TO_SLAVE;
-        }
-
-        break;
-
-      case TSTATE_MASTER_READ_ANS_HEADER:
-        printf("Master transaction read answer header\n");
+      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
+        printf("%s: receiving command header\n", tr_log_prefix(transaction->state));
         if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
                            DCP_HEADER_SIZE, 100) < DCP_HEADER_SIZE)
         {
@@ -321,8 +386,8 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         transaction->dcp_buffer.pos = DCP_HEADER_SIZE;
 
-        printf("Master transaction answer header received: "
-               "0x%02x 0x%02x 0x%02x 0x%02x\n",
+        printf("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x\n",
+               tr_log_prefix(transaction->state),
                transaction->dcp_buffer.buffer[0],
                transaction->dcp_buffer.buffer[1],
                transaction->dcp_buffer.buffer[2],
@@ -331,21 +396,28 @@ static void process_transaction(struct dcp_transaction *transaction,
         transaction->pending_size_of_transaction =
             get_dcp_data_size(transaction->dcp_buffer.buffer);
 
-        printf("pending %u\n", transaction->pending_size_of_transaction);
-
         if(transaction->pending_size_of_transaction > 0)
         {
-            transaction->state = TSTATE_MASTER_READ_ANS_DATA;
+            transaction->state = TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE;
             break;
         }
 
         transaction->pending_size_of_transaction = DCP_HEADER_SIZE;
-        transaction->state = TSTATE_MASTER_FLUSH_TO_DCP;
+        transaction->state = (is_read_command(transaction->dcp_buffer.buffer)
+                              ? TR_SLAVE_READCMD_FORWARDING_TO_DCPD
+                              : TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD);
+        break;
 
-        /* fall-through */
+      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
+        process_transaction_receive_data(transaction, fifo_in_fd, spi_fd);
+        break;
 
-      case TSTATE_MASTER_FLUSH_TO_DCP:
-        printf("Master transaction, send %zu bytes answer to DCP (%u pending)\n",
+      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
+      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
+        printf("%s: send %zu bytes answer to DCPD (%u pending)\n",
+               tr_log_prefix(transaction->state),
                transaction->dcp_buffer.pos,
                transaction->pending_size_of_transaction);
 
@@ -357,7 +429,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         if(sent_bytes < 0)
         {
-            printf("Master transaction send answer comm broken\n");
+            printf("%s: communication with DCPD broken\n", tr_log_prefix(transaction->state));
             reset_transaction(transaction);
             break;
         }
@@ -366,47 +438,17 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         if(transaction->pending_size_of_transaction == 0)
         {
-            printf("Master transaction DONE\n");
-            reset_transaction(transaction);
+            if(transaction->state == TR_SLAVE_READCMD_FORWARDING_TO_DCPD)
+            {
+                clear_buffer(&transaction->dcp_buffer);
+                transaction->state = TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD;
+            }
+            else
+            {
+                printf("%s: DONE\n", tr_log_prefix(transaction->state));
+                reset_transaction(transaction);
+            }
         }
-
-        break;
-
-      case TSTATE_MASTER_READ_ANS_DATA:
-        /* TODO: not implemented */
-        printf("Master transaction read answer data\n");
-        break;
-
-      case TSTATE_SLAVE_READ_REQ_HEADER:
-        /* TODO: not implemented */
-        printf("Slave transaction header\n");
-        break;
-
-      case TSTATE_SLAVE_READ_REQ_DATA:
-        /* TODO: not implemented */
-        printf("Slave transaction, need to receive %u bytes from SPI\n",
-               transaction->pending_size_of_transaction);
-        break;
-
-      case TSTATE_SLAVE_FLUSH_TO_DCP:
-        /* TODO: not implemented */
-        printf("Slave transaction, send %zu bytes over named pipe (were %zu bytes)\n",
-               transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
-        break;
-
-      case TSTATE_SLAVE_READ_ANS_HEADER:
-        /* TODO: not implemented */
-        printf("Slave transaction read answer header\n");
-        break;
-
-      case TSTATE_SLAVE_READ_ANS_DATA:
-        /* TODO: not implemented */
-        printf("Slave transaction read answer data\n");
-        break;
-
-      case TSTATE_SLAVE_FLUSH_TO_SLAVE:
-        /* TODO: not implemented */
-        printf("Slave transaction send answer data\n");
         break;
     }
 }
@@ -480,8 +522,8 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
 /*!
  * Copy data back and forth.
  *
- * As long as not transaction is in progress, we are waiting on activities on
- * the name pipe and the request pin. A transaction is started if either the
+ * As long as no transaction is in progress, we are waiting on activities on
+ * the named pipe and the request pin. A transaction is started if either the
  * request pin is activated or if some process is sending data to the named
  * pipe.
  *
@@ -491,20 +533,19 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
  * - Transaction initiated by the master ("master transaction")
  *
  * Slave transaction:
- * - Read data from SPI
- * - Transform for DCP
- * - Send transformed data to named pipe
- * - Wait for answer from named pipe
- * - Transform for SPI
- * - Send transformed data to SPI, with data rate limiting
+ * - Read four bytes long command from SPI
+ * - In case of write command: Read optional data from SPI
+ * - Transform for DCPD (unescape raw data)
+ * - Send transformed command and data to named pipe
+ * - In case of read command: Wait for answer from named pipe
+ * - In case of read command: Transform for SPI (insert escape sequences)
+ * - In case of read command: Send transformed data to SPI
  *
- * Master transaction:
- * - Read data from DCP
- * - Transform for SPI
- * - Send transformed data to SPI, with data rate limiting
- * - Wait for answer from SPI
- * - Transform for DCP
- * - Send transformed data to named pipe
+ * Master transaction (always write commands):
+ * - Read four bytes long write command from DCPD
+ * - Read optional data from DCPD
+ * - Transform for SPI (insert escape sequences)
+ * - Send transformed data to SPI
  */
 static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
                       const int spi_fd, const struct gpio_handle *const gpio)
