@@ -247,7 +247,8 @@ static const char *tr_log_prefix(enum transaction_state state)
 }
 
 static void process_transaction_receive_data(struct dcp_transaction *transaction,
-                                             int fifo_in_fd, int spi_fd)
+                                             int fifo_in_fd, int spi_fd,
+                                             unsigned int spi_timeout_ms)
 {
     const char *read_peer =
         (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
@@ -261,7 +262,8 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     const size_t read_size = compute_read_size(transaction);
     const int bytes_read =
         (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
-        ? spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer, read_size, 100)
+        ? spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer, read_size,
+                          spi_timeout_ms)
         : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
 
     if(bytes_read < 0)
@@ -290,7 +292,8 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
 }
 
 static void process_transaction(struct dcp_transaction *transaction,
-                                int fifo_in_fd, int fifo_out_fd, int spi_fd,
+                                int fifo_in_fd, int fifo_out_fd,
+                                int spi_fd, unsigned int spi_timeout_ms,
                                 bool is_slave_request)
 {
     switch(transaction->state)
@@ -382,7 +385,7 @@ static void process_transaction(struct dcp_transaction *transaction,
       case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
         msg_info("%s: receiving command header", tr_log_prefix(transaction->state));
         if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
-                           DCP_HEADER_SIZE, 100) < DCP_HEADER_SIZE)
+                           DCP_HEADER_SIZE, spi_timeout_ms) < DCP_HEADER_SIZE)
         {
             reset_transaction(transaction);
             break;
@@ -415,7 +418,8 @@ static void process_transaction(struct dcp_transaction *transaction,
       case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
       case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
       case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
-        process_transaction_receive_data(transaction, fifo_in_fd, spi_fd);
+        process_transaction_receive_data(transaction, fifo_in_fd, spi_fd,
+                                         spi_timeout_ms);
         break;
 
       case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
@@ -460,7 +464,8 @@ static void process_transaction(struct dcp_transaction *transaction,
 
 static void wait_for_dcp_data(struct dcp_transaction *transaction,
                               const int fifo_in_fd, const int fifo_out_fd,
-                              const int spi_fd, const int gpio_fd,
+                              const int spi_fd, unsigned int spi_timeout_ms,
+                              const int gpio_fd,
                               const struct gpio_handle *const gpio,
                               bool *gpio_active_state)
 {
@@ -493,8 +498,8 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     if(fds[0].revents & POLLPRI)
     {
         *gpio_active_state = gpio_is_active(gpio);
-        process_transaction(transaction, fifo_in_fd, fifo_out_fd, spi_fd,
-                            *gpio_active_state);
+        process_transaction(transaction, fifo_in_fd, fifo_out_fd,
+                            spi_fd, spi_timeout_ms, *gpio_active_state);
     }
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
@@ -511,8 +516,8 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     if(fds[1].revents & POLLIN)
     {
         if(expecting_dcp_data(transaction))
-            process_transaction(transaction, fifo_in_fd, fifo_out_fd, spi_fd,
-                                *gpio_active_state);
+            process_transaction(transaction, fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, *gpio_active_state);
         else
             /* FIXME: the DCP process needs to know about this */
             msg_info("collision: DCP tries to send command in the middle of a transaction");
@@ -579,14 +584,17 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
     const int gpio_fd = gpio_get_poll_fd(gpio);
     bool gpio_active_state = gpio_is_active(gpio);
 
+    static const unsigned int spi_timeout_ms = 1000;
+
     while(keep_running)
     {
         if(expecting_dcp_data(&transaction))
-            wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd, spi_fd,
+            wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd,
+                              spi_fd, spi_timeout_ms,
                               gpio_fd, gpio, &gpio_active_state);
         else
-            process_transaction(&transaction, fifo_in_fd, fifo_out_fd, spi_fd,
-                                gpio_active_state);
+            process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, gpio_active_state);
     }
 }
 
