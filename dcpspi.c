@@ -18,6 +18,7 @@
 #include "gpio.h"
 #include "dcpdefs.h"
 #include "messages.h"
+#include "os.h"
 
 /*!
  * Current state of the DCP transaction.

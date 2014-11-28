@@ -3,7 +3,6 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <string.h>
-#include <time.h>
 #include <errno.h>
 #include <assert.h>
 
@@ -11,6 +10,7 @@
 #include "spi_hw.h"
 #include "dcpdefs.h"
 #include "messages.h"
+#include "os.h"
 
 #define NUMBER_OF_BYTES_PER_SPI_TRANSFER  32U
 
@@ -108,7 +108,7 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
 
 static void compute_expiration_time(struct timespec *t, unsigned int timeout_ms)
 {
-    clock_gettime(CLOCK_MONOTONIC_RAW, t);
+    os_clock_gettime(CLOCK_MONOTONIC_RAW, t);
 
     const unsigned long timeout_remainder_ns =
         (timeout_ms % 1000U) * 1000ULL * 1000ULL;
@@ -218,7 +218,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
     while(output_buffer_pos < length)
     {
         struct timespec current_time;
-        clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+        os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
 
         if(timeout_expired(&expiration_time, &current_time))
         {

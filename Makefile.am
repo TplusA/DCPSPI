@@ -7,7 +7,7 @@ EXTRA_DIST = README.md cppcheck_suppressed.txt
 CLEANFILES = README.html
 
 dcpspi_SOURCES = \
-    dcpspi.c dcpdefs.h messages.c messages.h \
+    dcpspi.c dcpdefs.h os.c os.h messages.c messages.h \
     named_pipe.c named_pipe.h \
     gpio.c gpio.h spi.c spi.h spi_hw.c spi_hw.h
 
