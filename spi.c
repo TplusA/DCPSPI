@@ -3,6 +3,7 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <stdint.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -10,12 +11,15 @@
 #include <unistd.h>
 #include <time.h>
 #include <errno.h>
+#include <assert.h>
 
 #include <linux/spi/spidev.h>
 
 #include "spi.h"
 #include "dcpdefs.h"
 #include "messages.h"
+
+#define NUMBER_OF_BYTES_PER_SPI_TRANSFER  32U
 
 int spi_open_device(const char *devname)
 {
@@ -91,8 +95,8 @@ static inline uint8_t unescape_byte(uint8_t byte)
     return byte == 0x01 ? UINT8_MAX : byte;
 }
 
-static bool skip_nops(const uint8_t *restrict src, size_t src_size,
-                      size_t *restrict src_pos)
+static bool skip_nops(const uint8_t *const src, size_t src_size,
+                      size_t *const src_pos)
 {
     for(/* nothing */; *src_pos < src_size; ++*src_pos)
     {
@@ -103,40 +107,40 @@ static bool skip_nops(const uint8_t *restrict src, size_t src_size,
     return false;
 }
 
-static size_t filtered_copy(const uint8_t *restrict src, size_t src_size,
-                            size_t *restrict src_pos,
-                            bool *restrict pending_escape_sequence,
-                            uint8_t *restrict dest, size_t dest_size)
+static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
+                           bool *const pending_escape_sequence)
 {
-    if(!skip_nops(src, src_size, src_pos))
+    size_t src_pos = 0;
+
+    if(!skip_nops(buffer, buffer_size, &src_pos))
         return 0;
 
     size_t dest_pos = 0;
 
     if(*pending_escape_sequence)
     {
-        dest[dest_pos++] = unescape_byte(src[*src_pos++]);
+        buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
         *pending_escape_sequence = false;
     }
 
-    while(skip_nops(src, src_size, src_pos))
+    while(skip_nops(buffer, buffer_size, &src_pos))
     {
-        const uint8_t ch = src[*src_pos++];
+        const uint8_t ch = buffer[src_pos++];
 
         if(ch == DCP_ESCAPE_CHARACTER)
         {
-            ++*src_pos;
+            ++src_pos;
 
-           if(!skip_nops(src, src_size, src_pos))
+            if(!skip_nops(buffer, buffer_size, &src_pos))
             {
                 *pending_escape_sequence = true;
                 return dest_pos;
             }
 
-            dest[dest_pos++] = unescape_byte(src[*src_pos++]);
+            buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
         }
         else
-            dest[dest_pos++] = ch;
+            buffer[dest_pos++] = ch;
     }
 
     return dest_pos;
@@ -172,16 +176,87 @@ static bool timeout_expired(const struct timespec *restrict timeout,
     return current->tv_nsec >= timeout->tv_nsec;
 }
 
+/*!
+ * Read a few, fixed number of bytes from SPI, return them filtered.
+ *
+ * The buffer size must be at least #NUMBER_OF_BYTES_PER_SPI_TRANSFER bytes.
+ */
+static ssize_t read_chunk(int fd, uint8_t *buffer,
+                          bool *const pending_escape_sequence)
+{
+    /* kernel spidev driver defaults to writing hard-coded 0's in case we
+     * don't pass a tx_buf, but we need 0xff */
+    static const uint8_t dummy_bytes[NUMBER_OF_BYTES_PER_SPI_TRANSFER] =
+    {
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    };
+
+    const struct spi_ioc_transfer spi_transfer[] =
+    {
+        {
+            .tx_buf = (unsigned long)dummy_bytes,
+            .rx_buf = (unsigned long)buffer,
+            .len = sizeof(dummy_bytes),
+            .speed_hz = 128000,
+            .bits_per_word = 8,
+        },
+    };
+
+    int ret =
+        ioctl(fd,
+              SPI_IOC_MESSAGE(sizeof(spi_transfer) / sizeof(spi_transfer[0])),
+              spi_transfer);
+
+    if(ret < 0)
+    {
+        msg_error(errno, LOG_EMERG,
+                  "Failed reading %u bytes from SPI device fd %d",
+                  spi_transfer[0].len, fd);
+        return -1;
+    }
+
+    return filter_input(buffer, sizeof(dummy_bytes), pending_escape_sequence);
+}
+
+static size_t consume_from_buffer(uint8_t *src, size_t *src_size,
+                                  uint8_t *dest, size_t dest_size)
+{
+    if(*src_size == 0 || dest_size == 0)
+        return 0;
+
+    const size_t consumed = *src_size < dest_size ? *src_size : dest_size;
+
+    memcpy(dest, src, consumed);
+
+    if(consumed < *src_size)
+    {
+        memmove(src, src + consumed, *src_size - consumed);
+        *src_size -= consumed;
+    }
+    else
+        *src_size = 0;
+
+    return consumed;
+}
+
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms)
 {
     struct timespec expiration_time;
     compute_expiration_time(&expiration_time, timeout_ms);
 
-    size_t buffer_pos = 0;
-    bool pending_escape_sequence = false;
+    static uint8_t spi_input_buffer[NUMBER_OF_BYTES_PER_SPI_TRANSFER];
+    static size_t spi_input_buffer_pos;
 
-    while(buffer_pos < length)
+    /* first consume bytes from the buffer, if any */
+    size_t output_buffer_pos =
+        consume_from_buffer(spi_input_buffer, &spi_input_buffer_pos,
+                            buffer, length);
+
+    while(output_buffer_pos < length)
     {
         struct timespec current_time;
         clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
@@ -189,47 +264,40 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         if(timeout_expired(&expiration_time, &current_time))
         {
             msg_error(0, LOG_NOTICE,
-                      "SPI read timeout, returning %zd of %zu bytes",
-                      buffer_pos, length);
-            return buffer_pos;
+                      "SPI read timeout, returning %zu of %zu bytes",
+                      output_buffer_pos, length);
+            break;
         }
 
-        static uint8_t spi_input_buffer[64];
-        static size_t spi_input_buffer_pos;
+        assert(spi_input_buffer_pos == 0);
 
-        if(spi_input_buffer_pos >= sizeof(spi_input_buffer))
-        {
-            const struct spi_ioc_transfer spi_transfer[] =
-            {
-                {
-                    .rx_buf = (unsigned long)spi_input_buffer,
-                    .len = sizeof(spi_input_buffer),
-                    .speed_hz = 128000,
-                    .bits_per_word = 8,
-                },
-            };
+        /* read a few bytes from SPI into our buffer (with escape characters
+         * removed); keep them around for potential extra bytes that have been
+         * read, but were not requested by the caller (we cannot "unread" on
+         * SPI) */
+        static bool pending_escape_sequence = false;
+        const ssize_t chunk_size =
+            read_chunk(fd, spi_input_buffer, &pending_escape_sequence);
 
-            int ret =
-                ioctl(fd,
-                      SPI_IOC_MESSAGE(sizeof(spi_transfer) / sizeof(spi_transfer[0])),
-                      spi_transfer);
+        /* error out in case of hard communication error and return what got so
+         * far */
+        if(chunk_size < 0)
+            break;
 
-            if(ret < 0)
-            {
-                msg_error(errno, LOG_EMERG,
-                          "Failed reading %u bytes from SPI device fd %d",
-                          spi_transfer[0].len, fd);
-                return -1;
-            }
+        /* slave not ready, try again... */
+        if(chunk_size == 0)
+            continue;
 
-            spi_input_buffer_pos = 0;
-        }
+        /* got something */
+        assert((size_t)chunk_size <= sizeof(spi_input_buffer));
 
-        buffer_pos +=
-            filtered_copy(spi_input_buffer, sizeof(spi_input_buffer),
-                          &spi_input_buffer_pos, &pending_escape_sequence,
-                          buffer + buffer_pos, length - buffer_pos);
+        spi_input_buffer_pos += chunk_size;
+
+        output_buffer_pos +=
+            consume_from_buffer(spi_input_buffer, &spi_input_buffer_pos,
+                                buffer + output_buffer_pos,
+                                length - output_buffer_pos);
     }
 
-    return buffer_pos;
+    return output_buffer_pos;
 }
