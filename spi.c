@@ -2,20 +2,13 @@
 #include <config.h>
 #endif /* HAVE_CONFIG_H */
 
-#include <stdint.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <time.h>
 #include <errno.h>
 #include <assert.h>
 
-#include <linux/spi/spidev.h>
-
 #include "spi.h"
+#include "spi_hw.h"
 #include "dcpdefs.h"
 #include "messages.h"
 
@@ -23,44 +16,12 @@
 
 int spi_open_device(const char *devname)
 {
-    int fd;
-
-    while((fd = open(devname, O_RDWR | O_SYNC)) < 0 &&  errno == EINTR)
-        ;
-
-    if(fd < 0)
-    {
-        msg_error(errno, LOG_EMERG,
-                  "Failed opening SPI device \"%s\"", devname);
-        return -1;
-    }
-
-    static const uint32_t spi_mode = SPI_MODE_0;
-
-    if(ioctl(fd, SPI_IOC_WR_MODE, &spi_mode) < 0)
-    {
-        msg_error(errno, LOG_EMERG,
-                  "Failed setting SPI mode %u on device \"%s\"",
-                  spi_mode, devname);
-        goto error_set_mode;
-    }
-
-    return fd;
-
-error_set_mode:
-    spi_close_device(fd);
-    return -1;
+    return spi_hw_open_device(devname);
 }
 
 void spi_close_device(int fd)
 {
-    int ret;
-
-    while((ret = close(fd)) < 0 && errno == EINTR)
-        ;
-
-    if(ret < 0)
-        msg_error(errno, LOG_ERR, "Failed closing SPI device fd %d", fd);
+    return spi_hw_close_device(fd);
 }
 
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length)
@@ -76,9 +37,8 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length)
     };
 
     int ret =
-        ioctl(fd,
-              SPI_IOC_MESSAGE(sizeof(spi_transfer) / sizeof(spi_transfer[0])),
-              spi_transfer);
+        spi_hw_do_transfer(fd, spi_transfer,
+                           sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {
@@ -206,9 +166,8 @@ static ssize_t read_chunk(int fd, uint8_t *buffer,
     };
 
     int ret =
-        ioctl(fd,
-              SPI_IOC_MESSAGE(sizeof(spi_transfer) / sizeof(spi_transfer[0])),
-              spi_transfer);
+        spi_hw_do_transfer(fd, spi_transfer,
+                           sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {

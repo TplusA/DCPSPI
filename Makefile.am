@@ -9,7 +9,7 @@ CLEANFILES = README.html
 dcpspi_SOURCES = \
     dcpspi.c dcpdefs.h messages.c messages.h \
     named_pipe.c named_pipe.h \
-    gpio.c gpio.h spi.c spi.h
+    gpio.c gpio.h spi.c spi.h spi_hw.c spi_hw.h
 
 AM_CFLAGS = $(CWARNINGS)
 
