@@ -172,7 +172,7 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
 
 static void reset_transaction(struct dcp_transaction *transaction)
 {
-    printf("## Reset transaction\n");
+    msg_info("## Reset transaction");
 
     transaction->state = TR_IDLE;
 
@@ -198,8 +198,6 @@ static bool is_read_command(const uint8_t *dcp_header)
 static uint16_t get_dcp_data_size(const uint8_t *dcp_header)
 {
     const uint8_t command_type = get_dcp_command_type(dcp_header[0]);
-
-    printf("0x%02x 0x%02x\n", dcp_header[0], command_type);
 
     if(command_type == DCP_COMMAND_MULTI_WRITE_REGISTER ||
        command_type == DCP_COMMAND_MULTI_READ_REGISTER)
@@ -256,9 +254,9 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     const char *write_peer =
         (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "DCPD" : "slave";
 
-    printf("%s: need to receive %u bytes from %s\n",
-           tr_log_prefix(transaction->state),
-           transaction->pending_size_of_transaction, read_peer);
+    msg_info("%s: need to receive %u bytes from %s",
+             tr_log_prefix(transaction->state),
+             transaction->pending_size_of_transaction, read_peer);
 
     const size_t read_size = compute_read_size(transaction);
     const int bytes_read =
@@ -268,20 +266,20 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
 
     if(bytes_read < 0)
     {
-        printf("%s: communication with %s broken\n",
-               tr_log_prefix(transaction->state), read_peer);
+        msg_error(0, LOG_ERR, "%s: communication with %s broken",
+                  tr_log_prefix(transaction->state), read_peer);
         reset_transaction(transaction);
         return;
     }
 
     transaction->pending_size_of_transaction -= (size_t)bytes_read;
-    printf("%s: still pending %u\n", tr_log_prefix(transaction->state),
-           transaction->pending_size_of_transaction);
+    msg_info("%s: still pending %u", tr_log_prefix(transaction->state),
+             transaction->pending_size_of_transaction);
 
     if(transaction->pending_size_of_transaction == 0 ||
        is_buffer_full(&transaction->dcp_buffer))
     {
-        printf("%s: flush buffer to %s\n", tr_log_prefix(transaction->state), write_peer);
+        msg_info("%s: flush buffer to %s", tr_log_prefix(transaction->state), write_peer);
         if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD)
             transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
         else if(transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD)
@@ -312,20 +310,21 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
       case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
-        printf("%s: receiving command header\n", tr_log_prefix(transaction->state));
+        msg_info("%s: receiving command header", tr_log_prefix(transaction->state));
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
                                DCP_HEADER_SIZE - transaction->dcp_buffer.pos,
                                fifo_in_fd) < 0)
         {
-            printf("%s: communication with DCPD broken\n", tr_log_prefix(transaction->state));
+            msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
+                      tr_log_prefix(transaction->state));
             reset_transaction(transaction);
             break;
         }
 
         if(transaction->dcp_buffer.pos != DCP_HEADER_SIZE)
         {
-            printf("%s: header incomplete, waiting for more input\n",
-                   tr_log_prefix(transaction->state));
+            msg_info("%s: header incomplete, waiting for more input",
+                     tr_log_prefix(transaction->state));
             break;
         }
 
@@ -335,7 +334,12 @@ static void process_transaction(struct dcp_transaction *transaction,
          * the receiver of the data. We simply assume that we have a header
          * here and that the length can be determined.
          */
-        printf("%s: command header received\n", tr_log_prefix(transaction->state));
+        msg_info("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x",
+                 tr_log_prefix(transaction->state),
+                 transaction->dcp_buffer.buffer[0],
+                 transaction->dcp_buffer.buffer[1],
+                 transaction->dcp_buffer.buffer[2],
+                 transaction->dcp_buffer.buffer[3]);
 
         transaction->pending_size_of_transaction =
             get_dcp_data_size(transaction->dcp_buffer.buffer);
@@ -361,9 +365,9 @@ static void process_transaction(struct dcp_transaction *transaction,
         assert(transaction->pending_size_of_transaction == 0);
 
         fill_spi_buffer_from_dcp(transaction);
-        printf("%s: send %zu bytes over SPI (were %zu bytes)\n",
-               tr_log_prefix(transaction->state),
-               transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
+        msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
+                 tr_log_prefix(transaction->state),
+                 transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
         if(spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
                            transaction->spi_buffer.pos) < 0)
         {
@@ -371,12 +375,12 @@ static void process_transaction(struct dcp_transaction *transaction,
             break;
         }
 
-        printf("%s: DONE\n", tr_log_prefix(transaction->state));
+        msg_info("%s: DONE", tr_log_prefix(transaction->state));
         reset_transaction(transaction);
         break;
 
       case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-        printf("%s: receiving command header\n", tr_log_prefix(transaction->state));
+        msg_info("%s: receiving command header", tr_log_prefix(transaction->state));
         if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
                            DCP_HEADER_SIZE, 100) < DCP_HEADER_SIZE)
         {
@@ -386,12 +390,12 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         transaction->dcp_buffer.pos = DCP_HEADER_SIZE;
 
-        printf("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x\n",
-               tr_log_prefix(transaction->state),
-               transaction->dcp_buffer.buffer[0],
-               transaction->dcp_buffer.buffer[1],
-               transaction->dcp_buffer.buffer[2],
-               transaction->dcp_buffer.buffer[3]);
+        msg_info("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x",
+                 tr_log_prefix(transaction->state),
+                 transaction->dcp_buffer.buffer[0],
+                 transaction->dcp_buffer.buffer[1],
+                 transaction->dcp_buffer.buffer[2],
+                 transaction->dcp_buffer.buffer[3]);
 
         transaction->pending_size_of_transaction =
             get_dcp_data_size(transaction->dcp_buffer.buffer);
@@ -416,10 +420,10 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
       case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
-        printf("%s: send %zu bytes answer to DCPD (%u pending)\n",
-               tr_log_prefix(transaction->state),
-               transaction->dcp_buffer.pos,
-               transaction->pending_size_of_transaction);
+        msg_info("%s: send %zu bytes answer to DCPD (%u pending)",
+                 tr_log_prefix(transaction->state),
+                 transaction->dcp_buffer.pos,
+                 transaction->pending_size_of_transaction);
 
         ssize_t sent_bytes =
             send_buffer_to_fd(&transaction->dcp_buffer,
@@ -429,7 +433,8 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         if(sent_bytes < 0)
         {
-            printf("%s: communication with DCPD broken\n", tr_log_prefix(transaction->state));
+            msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
+                      tr_log_prefix(transaction->state));
             reset_transaction(transaction);
             break;
         }
@@ -445,7 +450,7 @@ static void process_transaction(struct dcp_transaction *transaction,
             }
             else
             {
-                printf("%s: DONE\n", tr_log_prefix(transaction->state));
+                msg_info("%s: DONE", tr_log_prefix(transaction->state));
                 reset_transaction(transaction);
             }
         }
@@ -471,7 +476,7 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
         },
     };
 
-    printf("Waiting for activities.\n");
+    msg_info("Waiting for activities.");
 
     int ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
 
