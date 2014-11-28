@@ -1,6 +1,10 @@
 #ifndef SPI_H
 #define SPI_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*!
  * Open SPI device by name.
  *
@@ -34,5 +38,9 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length);
  */
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* !SPI_H */
