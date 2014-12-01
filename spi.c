@@ -210,7 +210,7 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
 /*!
  * Read a few, fixed number of bytes from SPI, return them filtered.
  *
- * The buffer size must be at least #NUMBER_OF_BYTES_PER_SPI_TRANSFER bytes.
+ * The buffer size must be at least as big as the #spi_dummy_bytes array.
  */
 static ssize_t read_chunk(int fd, uint8_t *buffer,
                           bool *const pending_escape_sequence)
