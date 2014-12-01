@@ -12,12 +12,22 @@
 #include "messages.h"
 #include "os.h"
 
-#define NUMBER_OF_BYTES_PER_SPI_TRANSFER  32U
-
 /*!
  * SPI speed in Hz for all transfers.
  */
 static const uint32_t spi_speed_hz = 128000U;
+
+/*!
+ * Kernel spidev driver defaults to writing hard-coded 0's in case we
+ * don't pass a tx_buf, but we need 0xff.
+ */
+static const uint8_t spi_dummy_bytes[32] =
+{
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+};
 
 int spi_open_device(const char *devname)
 {
@@ -150,22 +160,12 @@ static bool timeout_expired(const struct timespec *restrict timeout,
 static ssize_t read_chunk(int fd, uint8_t *buffer,
                           bool *const pending_escape_sequence)
 {
-    /* kernel spidev driver defaults to writing hard-coded 0's in case we
-     * don't pass a tx_buf, but we need 0xff */
-    static const uint8_t dummy_bytes[NUMBER_OF_BYTES_PER_SPI_TRANSFER] =
-    {
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    };
-
     const struct spi_ioc_transfer spi_transfer[] =
     {
         {
-            .tx_buf = (unsigned long)dummy_bytes,
+            .tx_buf = (unsigned long)spi_dummy_bytes,
             .rx_buf = (unsigned long)buffer,
-            .len = sizeof(dummy_bytes),
+            .len = sizeof(spi_dummy_bytes),
             .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
         },
@@ -183,7 +183,7 @@ static ssize_t read_chunk(int fd, uint8_t *buffer,
         return -1;
     }
 
-    return filter_input(buffer, sizeof(dummy_bytes), pending_escape_sequence);
+    return filter_input(buffer, sizeof(spi_dummy_bytes), pending_escape_sequence);
 }
 
 static size_t consume_from_buffer(uint8_t *src, size_t *src_size,
@@ -209,7 +209,7 @@ static size_t consume_from_buffer(uint8_t *src, size_t *src_size,
 
 static struct
 {
-    uint8_t input_buffer[NUMBER_OF_BYTES_PER_SPI_TRANSFER];
+    uint8_t input_buffer[sizeof(spi_dummy_bytes)];
     size_t input_buffer_pos;
     bool pending_escape_sequence;
 }
