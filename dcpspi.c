@@ -654,6 +654,15 @@ static int setup(const struct parameters *parameters,
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);
 
+    if(!parameters->run_in_foreground)
+    {
+        if(daemon(0, 0) < 0)
+        {
+            msg_error(errno, LOG_EMERG, "Failed to run as daemon");
+            return -1;
+        }
+    }
+
     *fifo_in_fd = fifo_create_and_open(parameters->fifo_in_name, false);
     if(*fifo_in_fd < 0)
         return -1;
@@ -669,15 +678,6 @@ static int setup(const struct parameters *parameters,
     *gpio = gpio_open(parameters->gpio_num, false);
     if(*gpio == NULL)
         goto error_gpio_open;
-
-    if(!parameters->run_in_foreground)
-    {
-        if(daemon(0, 0) < 0)
-        {
-            msg_error(errno, LOG_EMERG, "Failed to run as daemon");
-            return -1;
-        }
-    }
 
     return 0;
 
