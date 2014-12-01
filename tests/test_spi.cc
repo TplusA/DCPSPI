@@ -39,6 +39,8 @@ void cut_setup(void)
     cppcut_assert_not_null(mock_spi_hw);
     mock_spi_hw->init();
     mock_spi_hw_singleton = mock_spi_hw;
+
+    spi_reset();
 }
 
 void cut_teardown(void)
@@ -53,37 +55,34 @@ void cut_teardown(void)
 
     delete mock_messages;
     delete mock_os;
-    delete mock_spi_hw_singleton;
+    delete mock_spi_hw;
 
     mock_messages = nullptr;
     mock_os = nullptr;
     mock_spi_hw = nullptr;
 }
 
-static int fail_transfer(int fd, const struct spi_ioc_transfer spi_transfer[],
-                         size_t number_of_fragments)
-{
-    cppcut_assert_equal(expected_spi_fd, fd);
-    cppcut_assert_operator(number_of_fragments, >, size_t(0));
-    return -1;
-}
-
 /*!\test
- * Hard errors returned by ioctl() are detected in #spi_read_buffer().
+ * Timeout due to extreme latency during context switch.
  */
-void test_hard_error_on_interface_is_detected(void)
+void test_timeout_without_any_read_is_possible(void)
 {
-    static struct timespec t =
+    static const struct timespec t1 =
     {
         .tv_sec = 1,
         .tv_nsec = 0,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(fail_transfer);
-    mock_messages->expect_msg_error_formatted(0, LOG_EMERG,
-                                              "Failed reading 32 bytes from SPI device fd 42");
+    static const struct timespec t2 =
+    {
+        .tv_sec = 2,
+        .tv_nsec = 0,
+    };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "SPI read timeout, returning 0 of 10 bytes");
 
     uint8_t buffer[10] = {0};
 

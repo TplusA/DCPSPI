@@ -42,6 +42,13 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length);
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms);
 
+/*!
+ * Reset internal state.
+ *
+ * In case of emergency during error recovery and for unit tests.
+ */
+void spi_reset(void);
+
 #ifdef __cplusplus
 }
 #endif
