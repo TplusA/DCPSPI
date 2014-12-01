@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
@@ -699,7 +700,7 @@ static void usage(const char *program_name)
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
            "  --spidev name  Name of the SPI device.\n"
-           "  --irq gpio     Number of the slave request pin.\n",
+           "  --gpio num     Number of the slave request pin.\n",
            program_name);
 }
 
@@ -710,7 +711,64 @@ static int process_command_line(int argc, char *argv[],
     parameters->fifo_out_name = "/tmp/spi_to_dcp";
     parameters->spidev_name = "/dev/spidev0.0";
     parameters->gpio_num = 4;
-    parameters->run_in_foreground = true;
+    parameters->run_in_foreground = false;
+
+#define CHECK_ARGUMENT() \
+    do \
+    { \
+        if(i + 1 >= argc) \
+        { \
+            fprintf(stderr, "Option %s requires an argument.\n", argv[i]); \
+            return -1; \
+        } \
+        ++i; \
+    } \
+    while(0)
+
+    for(int i = 1; i < argc; ++i)
+    {
+        if(strcmp(argv[i], "--help") == 0)
+            return 1;
+        else if(strcmp(argv[i], "--fg") == 0)
+            parameters->run_in_foreground = true;
+        else if(strcmp(argv[i], "--ififo") == 0)
+        {
+            CHECK_ARGUMENT();
+            parameters->fifo_in_name = argv[i];
+        }
+        else if(strcmp(argv[i], "--ofifo") == 0)
+        {
+            CHECK_ARGUMENT();
+            parameters->fifo_out_name = argv[i];
+        }
+        else if(strcmp(argv[i], "--spidev") == 0)
+        {
+            CHECK_ARGUMENT();
+            parameters->spidev_name = argv[i];
+        }
+        else if(strcmp(argv[i], "--gpio") == 0)
+        {
+            CHECK_ARGUMENT();
+
+            char *endptr;
+            unsigned long temp = strtoul(argv[i], &endptr, 10);
+
+            if(*endptr != '\0' || temp > UINT_MAX || (temp == ULONG_MAX && errno == ERANGE))
+            {
+                fprintf(stderr, "Invalid value \"%s\". Please try --help.\n", argv[i]);
+                return -1;
+            }
+
+            parameters->gpio_num = temp;
+        }
+        else
+        {
+            fprintf(stderr, "Unknown option \"%s\". Please try --help.\n", argv[i]);
+            return -1;
+        }
+    }
+
+#undef CHECK_ARGUMENT
 
     return 0;
 }
