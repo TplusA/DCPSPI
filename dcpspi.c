@@ -497,11 +497,7 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     }
 
     if(fds[0].revents & POLLPRI)
-    {
         *gpio_active_state = gpio_is_active(gpio);
-        process_transaction(transaction, fifo_in_fd, fifo_out_fd,
-                            spi_fd, spi_timeout_ms, *gpio_active_state);
-    }
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
         msg_error(0, LOG_WARNING,
@@ -528,6 +524,30 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
         msg_error(0, LOG_WARNING,
                   "Unexpected poll() events on fifo_fd %d: %04x",
                   fifo_in_fd, fds[1].revents);
+}
+
+static bool process_slave_request(struct dcp_transaction *transaction,
+                                  int fifo_in_fd, int fifo_out_fd,
+                                  int spi_fd, unsigned int spi_timeout_ms,
+                                  bool previous_state, bool new_state)
+{
+    if(previous_state == new_state)
+        return previous_state;
+
+    if(new_state)
+    {
+        if(transaction->state != TR_IDLE)
+        {
+            msg_error(0, LOG_WARNING,
+                      "Got slave request while processing DCP transaction.");
+            return previous_state;
+        }
+
+        process_transaction(transaction, fifo_in_fd, fifo_out_fd,
+                            spi_fd, spi_timeout_ms, new_state);
+    }
+
+    return new_state;
 }
 
 /*!
@@ -582,17 +602,30 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 
     reset_transaction(&transaction);
 
+    static const unsigned int spi_timeout_ms = 1000;
+
     const int gpio_fd = gpio_get_poll_fd(gpio);
     bool gpio_active_state = gpio_is_active(gpio);
 
-    static const unsigned int spi_timeout_ms = 1000;
+    if(gpio_active_state)
+        process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
+                            spi_fd, spi_timeout_ms, gpio_active_state);
 
     while(keep_running)
     {
         if(expecting_dcp_data(&transaction))
+        {
+            bool new_gpio_state = gpio_active_state;
+
             wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd,
                               spi_fd, spi_timeout_ms,
-                              gpio_fd, gpio, &gpio_active_state);
+                              gpio_fd, gpio, &new_gpio_state);
+
+            gpio_active_state =
+                process_slave_request(&transaction, fifo_in_fd, fifo_out_fd,
+                                      spi_fd, spi_timeout_ms,
+                                      gpio_active_state, new_gpio_state);
+        }
         else
             process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
                                 spi_fd, spi_timeout_ms, gpio_active_state);
