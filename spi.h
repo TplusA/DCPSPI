@@ -23,7 +23,8 @@ void spi_close_device(int fd);
 /*!
  * Send buffer as is over SPI.
  */
-int spi_send_buffer(int fd, const uint8_t *buffer, size_t length);
+int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
+                    unsigned int timeout_ms);
 
 /*!
  * Fill buffer from SPI, but remove 0xff NOP bytes.

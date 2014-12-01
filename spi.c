@@ -29,7 +29,8 @@ void spi_close_device(int fd)
     return spi_hw_close_device(fd);
 }
 
-int spi_send_buffer(int fd, const uint8_t *buffer, size_t length)
+int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
+                    unsigned int timeout_ms)
 {
     const struct spi_ioc_transfer spi_transfer[] =
     {

@@ -373,7 +373,7 @@ static void process_transaction(struct dcp_transaction *transaction,
                  tr_log_prefix(transaction->state),
                  transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
         if(spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                           transaction->spi_buffer.pos) < 0)
+                           transaction->spi_buffer.pos, spi_timeout_ms) < 0)
         {
             reset_transaction(transaction);
             break;
