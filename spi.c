@@ -14,6 +14,11 @@
 
 #define NUMBER_OF_BYTES_PER_SPI_TRANSFER  32U
 
+/*!
+ * SPI speed in Hz for all transfers.
+ */
+static const uint32_t spi_speed_hz = 128000U;
+
 int spi_open_device(const char *devname)
 {
     return spi_hw_open_device(devname);
@@ -31,7 +36,7 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length)
         {
             .tx_buf = (unsigned long)buffer,
             .len = length,
-            .speed_hz = 128000,
+            .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
         },
     };
@@ -160,7 +165,7 @@ static ssize_t read_chunk(int fd, uint8_t *buffer,
             .tx_buf = (unsigned long)dummy_bytes,
             .rx_buf = (unsigned long)buffer,
             .len = sizeof(dummy_bytes),
-            .speed_hz = 128000,
+            .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
         },
     };
