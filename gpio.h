@@ -7,7 +7,7 @@ struct gpio_handle;
 extern "C" {
 #endif
 
-struct gpio_handle *gpio_open(unsigned int gpio_num);
+struct gpio_handle *gpio_open(unsigned int gpio_num, bool is_active_low);
 void gpio_close(struct gpio_handle *gpio);
 int gpio_get_poll_fd(const struct gpio_handle *gpio);
 bool gpio_is_active(const struct gpio_handle *gpio);

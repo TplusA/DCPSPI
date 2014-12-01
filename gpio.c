@@ -16,6 +16,7 @@
 struct gpio_handle
 {
     bool is_in_use;
+    bool is_active_low;
     unsigned int gpio_num;
     int value_fd;
 };
@@ -168,7 +169,7 @@ static void unhook_from_gpio(struct gpio_handle *gpio)
     (void)write_to_gpio_file("/sys/class/gpio/unexport", buffer, buffer_length);
 }
 
-struct gpio_handle *gpio_open(unsigned int gpio_num)
+struct gpio_handle *gpio_open(unsigned int gpio_num, bool is_active_low)
 {
     if(the_gpio.is_in_use)
         return NULL;
@@ -177,6 +178,7 @@ struct gpio_handle *gpio_open(unsigned int gpio_num)
     if(the_gpio.value_fd < 0)
         return NULL;
 
+    the_gpio.is_active_low = is_active_low;
     the_gpio.gpio_num = gpio_num;
     the_gpio.is_in_use = true;
 
@@ -216,7 +218,7 @@ static bool sample_gpio_value(const struct gpio_handle *gpio)
         return false;
     }
 
-    return buffer[0] == '0';
+    return buffer[0] == '1';
 }
 
 bool gpio_is_active(const struct gpio_handle *gpio)
@@ -238,5 +240,5 @@ bool gpio_is_active(const struct gpio_handle *gpio)
         }
     }
 
-    return value;
+    return gpio->is_active_low ? !value : value;
 }

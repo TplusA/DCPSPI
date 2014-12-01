@@ -632,7 +632,7 @@ static int setup(const struct parameters *parameters,
     if(*spi_fd < 0)
         goto error_spi_open;
 
-    *gpio = gpio_open(parameters->gpio_num);
+    *gpio = gpio_open(parameters->gpio_num, false);
     if(*gpio == NULL)
         goto error_gpio_open;
 
