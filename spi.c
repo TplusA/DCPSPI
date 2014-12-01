@@ -39,9 +39,94 @@ void spi_close_device(int fd)
     return spi_hw_close_device(fd);
 }
 
+static void compute_expiration_time(struct timespec *t, unsigned int timeout_ms)
+{
+    os_clock_gettime(CLOCK_MONOTONIC_RAW, t);
+
+    const unsigned long timeout_remainder_ns =
+        (timeout_ms % 1000U) * 1000ULL * 1000ULL;
+
+    t->tv_sec += timeout_ms / 1000U;
+
+    if(timeout_remainder_ns < 1000ULL * 1000ULL * 1000ULL - t->tv_nsec)
+        t->tv_nsec += timeout_remainder_ns;
+    else
+    {
+        ++t->tv_sec;
+        t->tv_nsec =
+            timeout_remainder_ns - (1000ULL * 1000ULL * 1000ULL - t->tv_nsec);
+    }
+}
+
+static bool timeout_expired(const struct timespec *restrict timeout,
+                            const struct timespec *restrict current)
+{
+    if(current->tv_sec > timeout->tv_sec)
+        return true;
+    else if(current->tv_sec < timeout->tv_sec)
+        return false;
+
+    return current->tv_nsec >= timeout->tv_nsec;
+}
+
+static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
+{
+    uint8_t buffer[sizeof(spi_dummy_bytes)];
+
+    const struct spi_ioc_transfer spi_transfer[] =
+    {
+        {
+            .tx_buf = (unsigned long)spi_dummy_bytes,
+            .rx_buf = (unsigned long)buffer,
+            .len = sizeof(spi_dummy_bytes),
+            .speed_hz = spi_speed_hz,
+            .bits_per_word = 8,
+        },
+    };
+
+    struct timespec expiration_time;
+    compute_expiration_time(&expiration_time, timeout_ms);
+
+    while(1)
+    {
+        int ret =
+            spi_hw_do_transfer(fd, spi_transfer,
+                               sizeof(spi_transfer) / sizeof(spi_transfer[0]));
+
+        if(ret < 0)
+        {
+            msg_error(errno, LOG_EMERG,
+                      "Failed waiting for slave device on fd %d", fd);
+            return -1;
+        }
+
+        for(size_t i = 0; i < sizeof(buffer); ++i)
+        {
+            if(buffer[i] != UINT8_MAX)
+                return 0;
+        }
+
+        struct timespec current_time;
+        os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+
+        if(timeout_expired(&expiration_time, &current_time))
+        {
+            msg_error(0, LOG_NOTICE,
+                      "SPI write timeout, slave didn't get ready within %u ms",
+                      timeout_ms);
+            break;
+        }
+    }
+
+    return -1;
+}
+
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
                     unsigned int timeout_ms)
 {
+    if(wait_for_spi_slave(fd, timeout_ms) < 0)
+        return -1;
+
     const struct spi_ioc_transfer spi_transfer[] =
     {
         {
@@ -120,36 +205,6 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
     }
 
     return dest_pos;
-}
-
-static void compute_expiration_time(struct timespec *t, unsigned int timeout_ms)
-{
-    os_clock_gettime(CLOCK_MONOTONIC_RAW, t);
-
-    const unsigned long timeout_remainder_ns =
-        (timeout_ms % 1000U) * 1000ULL * 1000ULL;
-
-    t->tv_sec += timeout_ms / 1000U;
-
-    if(timeout_remainder_ns < 1000ULL * 1000ULL * 1000ULL - t->tv_nsec)
-        t->tv_nsec += timeout_remainder_ns;
-    else
-    {
-        ++t->tv_sec;
-        t->tv_nsec =
-            timeout_remainder_ns - (1000ULL * 1000ULL * 1000ULL - t->tv_nsec);
-    }
-}
-
-static bool timeout_expired(const struct timespec *restrict timeout,
-                            const struct timespec *restrict current)
-{
-    if(current->tv_sec > timeout->tv_sec)
-        return true;
-    else if(current->tv_sec < timeout->tv_sec)
-        return false;
-
-    return current->tv_nsec >= timeout->tv_nsec;
 }
 
 /*!
