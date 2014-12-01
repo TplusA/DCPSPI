@@ -1,3 +1,7 @@
+SUBDIRS = . tests
+
+ACLOCAL_AMFLAGS = -I m4
+
 bin_PROGRAMS = dcpspi
 
 html_DATA = README.html
@@ -9,9 +13,16 @@ CLEANFILES = README.html
 dcpspi_SOURCES = \
     dcpspi.c dcpdefs.h os.c os.h messages.c messages.h \
     named_pipe.c named_pipe.h \
-    gpio.c gpio.h spi.c spi.h spi_hw.c spi_hw.h
+    gpio.c gpio.h spi.h spi_hw.c spi_hw.h
 
 AM_CFLAGS = $(CWARNINGS)
+
+noinst_LTLIBRARIES = libspi.la
+
+dcpspi_LDADD = $(noinst_LTLIBRARIES)
+
+libspi_la_SOURCES = spi.c spi.h spi_hw.h dcpdefs.h messages.h os.h
+libspi_la_CFLAGS = $(AM_CFLAGS)
 
 .md.html:
 	$(MARKDOWN) $< >$@
