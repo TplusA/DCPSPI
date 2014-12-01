@@ -2,6 +2,10 @@
 CFLAGS="-std=c11 -pipe -g -O2 -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -fstrict-aliasing"
 CWARNINGS="-Wall -Waggregate-return -Wcast-qual -Wclobbered -Wsign-compare -Wuninitialized -Wunused-but-set-parameter -Wunused-function -Wundef -Wshadow -Winline -Wpointer-arith -Wfloat-equal -Wwrite-strings -Wstrict-aliasing -Wbad-function-cast -Wnested-externs -Wmissing-prototypes -Wstrict-prototypes -Wdouble-promotion"
 
+PKG_CONFIG='/usr/bin/pkg-config'
+export PKG_CONFIG_SYSROOT_DIR="${SYSROOT_DIR}"
+export PKG_CONFIG_PATH="${SYSROOT_DIR}/usr/share/pkgconfig:${SYSROOT_DIR}/usr/lib/arm-linux-gnueabihf/pkgconfig"
+
 DEBIAN_SYSROOT_DIR="${SYSROOT_DIR}"
 DEBIAN_SYSROOT_LIBPATH="${SYSROOT_DIR}/usr/lib/arm-linux-gnueabihf:${SYSROOT_DIR}/lib/arm-linux-gnueabihf"
 
