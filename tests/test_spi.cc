@@ -604,13 +604,13 @@ void test_read_timeout_is_precisely_measured(void)
     static const struct timespec t2 =
     {
         .tv_sec = 0,
-        .tv_nsec = 1000L * 1000UL * 1000UL * 1000UL - 1UL,
+        .tv_nsec = 800UL * 1000UL * 1000UL - 1UL,
     };
 
     static const struct timespec t3 =
     {
         .tv_sec = 1,
-        .tv_nsec = 0,
+        .tv_nsec = 800UL * 1000UL * 1000UL,
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
@@ -626,7 +626,7 @@ void test_read_timeout_is_precisely_measured(void)
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000));
+                                        buffer.data(), buffer.size(), 800));
     expect_buffer_content(buffer, 0x55);
 }
 
