@@ -1,4 +1,5 @@
 #include <cppcutter.h>
+#include <array>
 
 #include "spi.h"
 
@@ -76,6 +77,14 @@ static int read_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
     return 0;
 }
 
+template <size_t N>
+static void expect_buffer_content(std::array<uint8_t, N> &buffer,
+                                  uint8_t expected_value)
+{
+    for(auto b : buffer)
+        cppcut_assert_equal(expected_value, b);
+}
+
 /*!\test
  * Timeout during read due to extreme latency (context switch) between time
  * measurements.
@@ -100,9 +109,13 @@ void test_timeout_without_any_read_is_not_possible(void)
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
-    uint8_t buffer[10] = {0};
+    std::array<uint8_t, 10> buffer;
+    buffer.fill(0x55);
 
-    cppcut_assert_equal(ssize_t(0), spi_read_buffer(expected_spi_fd, buffer, sizeof(buffer), 1000));
+    cppcut_assert_equal(ssize_t(0),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 1000));
+    expect_buffer_content(buffer, 0x55);
 }
 
 /*!\test
@@ -137,9 +150,13 @@ void test_read_timeout_is_precisely_measured(void)
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
-    uint8_t buffer[10] = {0};
+    std::array<uint8_t, 10> buffer;
+    buffer.fill(0x55);
 
-    cppcut_assert_equal(ssize_t(0), spi_read_buffer(expected_spi_fd, buffer, sizeof(buffer), 1000));
+    cppcut_assert_equal(ssize_t(0),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 1000));
+    expect_buffer_content(buffer, 0x55);
 }
 
 };
