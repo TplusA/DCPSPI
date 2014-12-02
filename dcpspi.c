@@ -95,32 +95,6 @@ static void clear_buffer(struct buffer *buffer)
     buffer->pos = 0;
 }
 
-static void fill_spi_buffer_from_dcp(struct dcp_transaction *transaction)
-{
-    const struct buffer *const src = &transaction->dcp_buffer;
-    struct buffer *const dest = &transaction->spi_buffer;
-
-    clear_buffer(dest);
-
-    for(size_t i = 0; i < src->pos; ++i)
-    {
-        const uint8_t ch = src->buffer[i];
-
-        if(ch == UINT8_MAX)
-        {
-            dest->buffer[dest->pos++] = DCP_ESCAPE_CHARACTER;
-            dest->buffer[dest->pos++] = 0x01;
-        }
-        else if(ch == DCP_ESCAPE_CHARACTER)
-        {
-            dest->buffer[dest->pos++] = DCP_ESCAPE_CHARACTER;
-            dest->buffer[dest->pos++] = DCP_ESCAPE_CHARACTER;
-        }
-        else
-            dest->buffer[dest->pos++] = ch;
-    }
-}
-
 static bool is_buffer_full(const struct buffer *buffer)
 {
     return buffer->pos >= buffer->size;
@@ -369,7 +343,13 @@ static void process_transaction(struct dcp_transaction *transaction,
       case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
         assert(transaction->pending_size_of_transaction == 0);
 
-        fill_spi_buffer_from_dcp(transaction);
+        clear_buffer(&transaction->spi_buffer);
+        transaction->spi_buffer.pos =
+            spi_fill_buffer_from_raw_data(transaction->spi_buffer.buffer,
+                                          transaction->spi_buffer.size,
+                                          transaction->dcp_buffer.buffer,
+                                          transaction->dcp_buffer.size);
+
         msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
                  tr_log_prefix(transaction->state),
                  transaction->spi_buffer.pos, transaction->dcp_buffer.pos);

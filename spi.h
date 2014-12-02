@@ -21,6 +21,15 @@ int spi_open_device(const char *devname);
 void spi_close_device(int fd);
 
 /*!
+ * Copy buffer content, escape special characters according to DCP specs.
+ *
+ * \returns
+ *     The number of bytes written to \p dest.
+ */
+size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
+                                     const uint8_t *src, size_t src_size);
+
+/*!
  * Send buffer as is over SPI.
  */
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,

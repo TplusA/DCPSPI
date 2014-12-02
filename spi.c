@@ -153,6 +153,32 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         return 0;
 }
 
+size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
+                                     const uint8_t *src, size_t src_size)
+{
+    size_t pos = 0;
+
+    for(size_t i = 0; i < src_size; ++i)
+    {
+        const uint8_t ch = src[i];
+
+        if(ch == UINT8_MAX)
+        {
+            dest[pos++] = DCP_ESCAPE_CHARACTER;
+            dest[pos++] = 0x01;
+        }
+        else if(ch == DCP_ESCAPE_CHARACTER)
+        {
+            dest[pos++] = DCP_ESCAPE_CHARACTER;
+            dest[pos++] = DCP_ESCAPE_CHARACTER;
+        }
+        else
+            dest[pos++] = ch;
+    }
+
+    return pos;
+}
+
 static inline uint8_t unescape_byte(uint8_t byte)
 {
     return byte == 0x01 ? UINT8_MAX : byte;
