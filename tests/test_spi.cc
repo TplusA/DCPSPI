@@ -366,11 +366,9 @@ void test_read_escaped_data_from_spi(void)
                             buffer.data(), buffer.size());
 }
 
-/*!\test
- * Regular happy case: just write some data to SPI slave, no escape character.
- */
-void test_write_to_spi(void)
+static void expect_spi_slave_gets_ready(void)
 {
+    /* let's assume eight cycles */
     static const std::array<uint8_t, short_spi_transfer_size> slave_gets_ready =
     {
         UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX,
@@ -379,6 +377,14 @@ void test_write_to_spi(void)
 
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, slave_gets_ready);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+}
+
+/*!\test
+ * Regular happy case: just write some data to SPI slave, no escape character.
+ */
+void test_write_to_spi(void)
+{
+    expect_spi_slave_gets_ready();
 
     std::array<uint8_t, 100> expected_content;
     for(size_t i = 0; i < expected_content.size(); ++i)
@@ -394,6 +400,62 @@ void test_write_to_spi(void)
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
                                         expected_content.size(), 500));
+}
+
+/*!\test
+ * Write some data to SPI slave with to-be-escaped characters inside.
+ *
+ * Note that the expected behavior is that all data are sent as-is! Escaping of
+ * raw data must be done by calling #spi_fill_buffer_from_raw_data().
+ */
+void test_write_escaped_data_to_spi(void)
+{
+    expect_spi_slave_gets_ready();
+
+    static const std::array<uint8_t, 6> raw_data =
+    {
+        0x00, 0x01, 0x02, DCP_ESCAPE_CHARACTER, UINT8_MAX - 1U, UINT8_MAX,
+    };
+
+    spi_rw_data->set(raw_data);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    cppcut_assert_equal(0,
+                        spi_send_buffer(expected_spi_fd, raw_data.data(),
+                                        raw_data.size(), 500));
+}
+
+/*!\test
+ * Escape data for DCP-over-SPI.
+ */
+void test_escape_data_for_dcp_over_spi(void)
+{
+    static const std::array<uint8_t, 6> raw_data =
+    {
+        0x00, 0x01, 0x02, DCP_ESCAPE_CHARACTER, UINT8_MAX - 1U, UINT8_MAX,
+    };
+
+    static const std::array<uint8_t, 8> expected_result =
+    {
+        0x00,                                           /* regular byte */
+        0x01,                                           /* regular byte */
+        0x02,                                           /* regular byte */
+        DCP_ESCAPE_CHARACTER, DCP_ESCAPE_CHARACTER,     /* escaped escape */
+        UINT8_MAX - 1U,                                 /* regular byte */
+        DCP_ESCAPE_CHARACTER, 0x01,                     /* escaped NOP */
+    };
+
+    uint8_t buffer[64];
+
+    cppcut_assert_equal(expected_result.size(),
+                        spi_fill_buffer_from_raw_data(buffer, sizeof(buffer),
+                                                      raw_data.data(),
+                                                      raw_data.size()));
+    cut_assert_equal_memory(expected_result.data(), expected_result.size(),
+                            buffer, expected_result.size());
 }
 
 static int read_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
