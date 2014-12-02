@@ -283,7 +283,7 @@ static int mock_spi_transfer(int fd,
     return partial.return_value_;
 }
 
-static void expect_spi_transfers(size_t number_of_bytes)
+static size_t expect_spi_transfers(size_t number_of_bytes)
 {
     const size_t count =
         number_of_bytes / short_spi_transfer_size +
@@ -291,6 +291,8 @@ static void expect_spi_transfers(size_t number_of_bytes)
 
     for(size_t i = 0; i < count; ++i)
         mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    return count;
 }
 
 /*!\test
@@ -363,6 +365,39 @@ void test_read_escaped_data_from_spi(void)
         0x00, UINT8_MAX, 0x02, DCP_ESCAPE_CHARACTER, UINT8_MAX - 1U, 0x03,
         DCP_ESCAPE_CHARACTER,
     };
+
+    cut_assert_equal_memory(expected_content.data(), expected_content.size(),
+                            buffer.data(), buffer.size());
+}
+
+/*!\test
+ * Write data in two short SPI transfers so that first transfer ends with an
+ * escape character.
+ */
+void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escape(void)
+{
+    /* 64 bytes, escape at offset 31 (last byte of first chunk), escaped data
+     * at offset 32 (first byte of second chunk) */
+    std::array<uint8_t, 2 * short_spi_transfer_size> data = {0};
+    data[short_spi_transfer_size - 1] = DCP_ESCAPE_CHARACTER;
+    data[short_spi_transfer_size] = 0x01;
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, data);
+    cppcut_assert_equal(size_t(2), expect_spi_transfers(data.size()));
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    /* should receive 63 bytes */
+    std::array<uint8_t, 2 * short_spi_transfer_size - 1> buffer;
+    buffer.fill(0x55);
+
+    cppcut_assert_equal(ssize_t(buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 500));
+
+    std::array<uint8_t, 2 * short_spi_transfer_size - 1> expected_content = {0};
+    expected_content[short_spi_transfer_size - 1] = UINT8_MAX;
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
                             buffer.data(), buffer.size());
