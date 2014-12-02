@@ -102,10 +102,12 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
 
         for(size_t i = 0; i < sizeof(buffer); ++i)
         {
+            /* slave sent some non-NOP byte, so it's ready to accept data */
             if(buffer[i] != UINT8_MAX)
                 return 0;
         }
 
+        /* only NOPs, try again if we are within the specified timeout... */
         struct timespec current_time;
         os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
 
@@ -273,6 +275,7 @@ spi_read_globals;
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms)
 {
+    bool reset_timeout = false;
     struct timespec expiration_time;
     compute_expiration_time(&expiration_time, timeout_ms);
 
@@ -284,17 +287,6 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
     while(output_buffer_pos < length)
     {
-        struct timespec current_time;
-        os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-
-        if(timeout_expired(&expiration_time, &current_time))
-        {
-            msg_error(0, LOG_NOTICE,
-                      "SPI read timeout, returning %zu of %zu bytes",
-                      output_buffer_pos, length);
-            break;
-        }
-
         assert(spi_read_globals.input_buffer_pos == 0);
 
         /* read a few bytes from SPI into our buffer (with escape characters
@@ -312,13 +304,33 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
         /* slave not ready, try again... */
         if(chunk_size == 0)
+        {
+            struct timespec current_time;
+            os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+
+            if(timeout_expired(&expiration_time, &current_time))
+            {
+                msg_error(0, LOG_NOTICE,
+                          "SPI read timeout, returning %zu of %zu bytes",
+                          output_buffer_pos, length);
+                break;
+            }
+
+            if(reset_timeout)
+            {
+                expiration_time = current_time;
+                reset_timeout = false;
+            }
+
             continue;
+        }
 
         /* got something */
         assert((size_t)chunk_size <= sizeof(spi_read_globals.input_buffer));
 
-        spi_read_globals.input_buffer_pos += chunk_size;
+        reset_timeout = true;
 
+        spi_read_globals.input_buffer_pos += chunk_size;
         output_buffer_pos +=
             consume_from_buffer(spi_read_globals.input_buffer,
                                 &spi_read_globals.input_buffer_pos,
