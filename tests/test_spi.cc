@@ -104,6 +104,7 @@ class spi_rw_data_t
             break;
 
           case EXPECT_READ_ZEROS:
+            read_data.fill(0);
             break;
         }
 
@@ -125,6 +126,7 @@ class spi_rw_data_t
             break;
 
           case EXPECT_WRITE_ZEROS:
+            write_data.fill(0);
             break;
         }
 
