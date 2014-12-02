@@ -681,6 +681,55 @@ void test_timeout_overflow_in_struct_timespec(void)
 }
 
 /*!\test
+ * Timeout handling also works on a seconds scale.
+ */
+void test_long_timeout(void)
+{
+    static const struct timespec t1 =
+    {
+        .tv_sec = 0,
+        .tv_nsec = 300UL * 1000UL * 1000UL,
+    };
+
+    /* 1.7 seconds later than t1 */
+    static const struct timespec t2 =
+    {
+        .tv_sec = 2,
+        .tv_nsec = 0,
+    };
+
+    /* 2.999999999 seconds seconds later than t1 */
+    static const struct timespec t3 =
+    {
+        .tv_sec = 3,
+        .tv_nsec = 300UL * 1000UL * 1000UL - 1UL,
+    };
+
+    /* 3 seconds later than t1 */
+    static const struct timespec t4 =
+    {
+        .tv_sec = 3,
+        .tv_nsec = 300UL * 1000UL * 1000UL,
+    };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t4);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "SPI read timeout, returning 0 of 10 bytes");
+
+    std::array<uint8_t, 10> buffer;
+
+    cppcut_assert_equal(ssize_t(0),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 3000));
+}
+
+/*!\test
  * Timeout during write due to extreme latency (context switch) between time
  * measurements.
  */
