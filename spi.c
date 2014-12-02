@@ -158,19 +158,21 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
 {
     size_t pos = 0;
 
-    for(size_t i = 0; i < src_size; ++i)
+    for(size_t i = 0; i < src_size && pos < dest_size; ++i)
     {
         const uint8_t ch = src[i];
 
         if(ch == UINT8_MAX)
         {
             dest[pos++] = DCP_ESCAPE_CHARACTER;
-            dest[pos++] = 0x01;
+            if(pos < dest_size)
+                dest[pos++] = 0x01;
         }
         else if(ch == DCP_ESCAPE_CHARACTER)
         {
             dest[pos++] = DCP_ESCAPE_CHARACTER;
-            dest[pos++] = DCP_ESCAPE_CHARACTER;
+            if(pos < dest_size)
+                dest[pos++] = DCP_ESCAPE_CHARACTER;
         }
         else
             dest[pos++] = ch;

@@ -458,6 +458,82 @@ void test_escape_data_for_dcp_over_spi(void)
                             buffer, expected_result.size());
 }
 
+/*!\test
+ * Destination buffer size is respected while escaping data.
+ */
+void test_too_small_buffer_for_escaped_data(void)
+{
+    static const std::array<uint8_t, 10> src_data =
+    {
+        0x05, 0x23, 0x42, 0x7f, 0x81, 0x00, 0xe5, 0x2b, 0xa9, 0x61
+    };
+
+    std::array<uint8_t, 12> dest_buffer;
+    dest_buffer.fill(0x55);
+
+    cppcut_assert_equal(size_t(8),
+                        spi_fill_buffer_from_raw_data(dest_buffer.data() + 2, 8,
+                                                      src_data.data(),
+                                                      src_data.size()));
+
+    cut_assert_equal_memory(dest_buffer.data() + 2, 8, src_data.data(), 8);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[0]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[1]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[10]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[11]);
+}
+
+/*!\test
+ * Destination buffer size is respected while escaping last character.
+ */
+void test_too_small_buffer_for_escaped_data_with_last_char_is_escape(void)
+{
+    static const std::array<uint8_t, 5> src_data =
+    {
+        0x05, 0x23, 0x42, DCP_ESCAPE_CHARACTER, UINT8_MAX,
+    };
+
+    std::array<uint8_t, 8> dest_buffer;
+    dest_buffer.fill(0x55);
+
+    cppcut_assert_equal(size_t(4),
+                        spi_fill_buffer_from_raw_data(dest_buffer.data() + 2, 4,
+                                                      src_data.data(),
+                                                      src_data.size()));
+
+    cut_assert_equal_memory(dest_buffer.data() + 2, 4, src_data.data(), 4);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[0]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[1]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[6]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[7]);
+}
+
+/*!\test
+ * Destination buffer size is respected while escaping last character.
+ */
+void test_too_small_buffer_for_escaped_data_with_last_char_is_uint8_max(void)
+{
+    static const std::array<uint8_t, 5> src_data =
+    {
+        0x05, 0x23, 0x42, UINT8_MAX, DCP_ESCAPE_CHARACTER,
+    };
+
+    std::array<uint8_t, 8> dest_buffer;
+    dest_buffer.fill(0x55);
+
+    cppcut_assert_equal(size_t(4),
+                        spi_fill_buffer_from_raw_data(dest_buffer.data() + 2, 4,
+                                                      src_data.data(),
+                                                      src_data.size()));
+
+    cut_assert_equal_memory(dest_buffer.data() + 2, 3, src_data.data(), 3);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[0]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[1]);
+    cppcut_assert_equal(uint8_t(DCP_ESCAPE_CHARACTER), dest_buffer[5]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[6]);
+    cppcut_assert_equal(uint8_t(0x55), dest_buffer[7]);
+}
+
 static int read_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
                      size_t number_of_fragments)
 {
