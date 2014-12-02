@@ -1,7 +1,9 @@
 #include <cppcutter.h>
 #include <array>
+#include <algorithm>
 
 #include "spi.h"
+#include "dcpdefs.h"
 
 #include "mock_messages.hh"
 #include "mock_spi_hw.hh"
@@ -19,6 +21,175 @@ namespace spi_communication_tests
 {
 
 static constexpr int expected_spi_fd = 42;
+static constexpr size_t short_spi_transfer_size = 32;
+
+class spi_rw_data_partial_t
+{
+  public:
+    spi_rw_data_partial_t(const spi_rw_data_partial_t &) = delete;
+    spi_rw_data_partial_t &operator=(const spi_rw_data_partial_t &) = delete;
+
+    spi_rw_data_partial_t(spi_rw_data_partial_t &&) = default;
+
+    const std::vector<uint8_t> expected_write_data_;
+    const std::vector<uint8_t> read_data_;
+    const size_t transfer_size_;
+    const int errno_value_;
+    const int return_value_;
+    std::vector<uint8_t> written_data_;
+
+    explicit spi_rw_data_partial_t(const std::vector<uint8_t> write_data,
+                                   const std::vector<uint8_t> read_data,
+                                   size_t transfer_size, int err, int ret):
+        expected_write_data_(write_data),
+        read_data_(read_data),
+        transfer_size_(transfer_size),
+        errno_value_(err),
+        return_value_(ret)
+    {}
+
+    explicit spi_rw_data_partial_t(const std::vector<uint8_t> write_data,
+                                   size_t transfer_size, int err, int ret):
+        expected_write_data_(write_data),
+        transfer_size_(transfer_size),
+        errno_value_(err),
+        return_value_(ret)
+    {}
+};
+
+class spi_rw_data_t
+{
+  public:
+    enum write_nops
+    {
+        EXPECT_WRITE_NOPS,
+        EXPECT_WRITE_ZEROS,
+    };
+
+    enum read_nops
+    {
+        EXPECT_READ_NOPS,
+        EXPECT_READ_ZEROS,
+    };
+
+    spi_rw_data_t(const spi_rw_data_t &) = delete;
+    spi_rw_data_t &operator=(const spi_rw_data_t &) = delete;
+
+    size_t fragment_;
+    std::vector<spi_rw_data_partial_t> partial_;
+
+    explicit spi_rw_data_t(): fragment_(0) {}
+
+    /*!
+     * One big write transfer, don't care about answer (rx buffer is NULL).
+     */
+    template <size_t N>
+    void set(const std::array<uint8_t, N> &write_data)
+    {
+        set(write_data.data(), N, 0, 0);
+    }
+
+    /*!
+     * Several small write transfers with constant answer from slave.
+     */
+    template <size_t N>
+    void set(const std::array<uint8_t, N> &write_data, enum read_nops nops)
+    {
+        std::array<uint8_t, N> read_data;
+
+        switch(nops)
+        {
+          case EXPECT_READ_NOPS:
+            read_data.fill(UINT8_MAX);
+            break;
+
+          case EXPECT_READ_ZEROS:
+            break;
+        }
+
+        set_fragments(write_data.data(), read_data.data(), N);
+    }
+
+    /*!
+     * Several small read transfers with constant value written to slave.
+     */
+    template <size_t N>
+    void set(enum write_nops nops, const std::array<uint8_t, N> &read_data)
+    {
+        std::array<uint8_t, N> write_data;
+
+        switch(nops)
+        {
+          case EXPECT_WRITE_NOPS:
+            write_data.fill(UINT8_MAX);
+            break;
+
+          case EXPECT_WRITE_ZEROS:
+            break;
+        }
+
+        set_fragments(write_data.data(), read_data.data(), N);
+    }
+
+    /*!
+     * Full expected transfer specification.
+     */
+    template <size_t N>
+    void set(const std::array<uint8_t, N> &write_data,
+             const std::array<uint8_t, N> &read_data)
+    {
+        set_fragments(write_data.data(), read_data.data(), N);
+    }
+
+  private:
+    void set_fragments(const uint8_t *write_data, const uint8_t *read_data,
+                       size_t transfer_size)
+    {
+        for(size_t offset = 0; offset < transfer_size; offset += short_spi_transfer_size)
+        {
+            const size_t count =
+                std::min(short_spi_transfer_size, transfer_size - offset);
+
+            if(count == short_spi_transfer_size)
+                set(write_data + offset, read_data + offset,
+                    short_spi_transfer_size, 0, 0);
+            else
+            {
+                std::array<uint8_t, short_spi_transfer_size> last_write_data;
+                std::array<uint8_t, short_spi_transfer_size> last_read_data;
+
+                last_write_data.fill(UINT8_MAX);
+                last_read_data.fill(UINT8_MAX);
+
+                std::copy_n(write_data + offset, count, last_write_data.begin());
+                std::copy_n(read_data + offset,  count, last_read_data.begin());
+
+                set(last_write_data.data(), last_read_data.data(),
+                    short_spi_transfer_size, 0, 0);
+            }
+        }
+    }
+
+    void set(const uint8_t *write_data,
+             size_t transfer_size, int err, ssize_t ret)
+    {
+        partial_.push_back(spi_rw_data_partial_t(std::vector<uint8_t>(write_data,
+                                                                      write_data + transfer_size),
+                                                 transfer_size, err, ret));
+    }
+
+    void set(const uint8_t *write_data, const uint8_t *read_data,
+             size_t transfer_size, int err, ssize_t ret)
+    {
+        partial_.push_back(spi_rw_data_partial_t(std::vector<uint8_t>(write_data,
+                                                                      write_data + transfer_size),
+                                                 std::vector<uint8_t>(read_data,
+                                                                      read_data + transfer_size),
+                                                 transfer_size, err, ret));
+    }
+};
+
+static spi_rw_data_t *spi_rw_data;
 
 static MockMessages *mock_messages;
 static MockOs *mock_os;
@@ -41,6 +212,9 @@ void cut_setup(void)
     mock_spi_hw->init();
     mock_spi_hw_singleton = mock_spi_hw;
 
+    spi_rw_data = new spi_rw_data_t;
+    cppcut_assert_not_null(spi_rw_data);
+
     spi_reset();
 }
 
@@ -61,6 +235,116 @@ void cut_teardown(void)
     mock_messages = nullptr;
     mock_os = nullptr;
     mock_spi_hw = nullptr;
+
+    delete spi_rw_data;
+    spi_rw_data = nullptr;
+}
+
+static int mock_spi_transfer(int fd,
+                             const struct spi_ioc_transfer spi_transfer[],
+                             size_t number_of_fragments)
+{
+    cppcut_assert_equal(expected_spi_fd, fd);
+    cppcut_assert_equal(size_t(1), number_of_fragments);
+    cppcut_assert_operator(spi_rw_data->fragment_, <, spi_rw_data->partial_.size());
+
+    const spi_rw_data_partial_t &partial(spi_rw_data->partial_[spi_rw_data->fragment_++]);
+
+    if(partial.read_data_.size() > 0)
+        cppcut_assert_not_equal(__u64(0), spi_transfer[0].rx_buf);
+    else
+        cppcut_assert_equal(__u64(0), spi_transfer[0].rx_buf);
+
+    if(partial.expected_write_data_.size() > 0)
+        cppcut_assert_not_equal(__u64(0), spi_transfer[0].tx_buf);
+    else
+        cppcut_assert_equal(__u64(0), spi_transfer[0].tx_buf);
+
+    cppcut_assert_equal(partial.transfer_size_, size_t(spi_transfer[0].len));
+    cppcut_assert_equal(partial.transfer_size_, partial.expected_write_data_.size());
+
+    if(partial.read_data_.size() > 0)
+    {
+        cppcut_assert_equal(partial.transfer_size_, partial.read_data_.size());
+        std::copy_n(partial.read_data_.begin(), partial.read_data_.size(),
+                    reinterpret_cast<uint8_t *>(spi_transfer[0].rx_buf));
+    }
+
+    if(partial.expected_write_data_.size() > 0)
+        cut_assert_equal_memory(partial.expected_write_data_.data(),
+                                partial.expected_write_data_.size(),
+                                reinterpret_cast<uint8_t *>(spi_transfer[0].tx_buf),
+                                spi_transfer[0].len);
+
+    errno = partial.errno_value_;
+
+    return partial.return_value_;
+}
+
+static void expect_spi_transfers(size_t number_of_bytes)
+{
+    const size_t count =
+        number_of_bytes / short_spi_transfer_size +
+        ((number_of_bytes % short_spi_transfer_size) == 0 ? 0 : 1);
+
+    for(size_t i = 0; i < count; ++i)
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+}
+
+/*!\test
+ * Regular happy case: just read some data from SPI slave, no escape character.
+ */
+void test_read_from_spi(void)
+{
+    std::array<uint8_t, 100> expected_content;
+    for(size_t i = 0; i < expected_content.size(); ++i)
+        expected_content[i] = i + DCP_ESCAPE_CHARACTER + 1;
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, expected_content);
+    expect_spi_transfers(expected_content.size());
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    std::array<uint8_t, 100> buffer;
+    buffer.fill(0xab);
+
+    cppcut_assert_equal(ssize_t(buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 500));
+
+    cut_assert_equal_memory(expected_content.data(), expected_content.size(),
+                            buffer.data(), buffer.size());
+}
+
+/*!\test
+ * Regular happy case: just write some data to SPI slave, no escape character.
+ */
+void test_write_to_spi(void)
+{
+    static const std::array<uint8_t, short_spi_transfer_size> slave_gets_ready =
+    {
+        UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX,
+        UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX,
+    };
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, slave_gets_ready);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    std::array<uint8_t, 100> expected_content;
+    for(size_t i = 0; i < expected_content.size(); ++i)
+        expected_content[i] = i + DCP_ESCAPE_CHARACTER + 1;
+
+    spi_rw_data->set(expected_content);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    cppcut_assert_equal(0,
+                        spi_send_buffer(expected_spi_fd,
+                                        expected_content.data(),
+                                        expected_content.size(), 500));
 }
 
 static int read_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
@@ -157,6 +441,38 @@ void test_read_timeout_is_precisely_measured(void)
                         spi_read_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000));
     expect_buffer_content(buffer, 0x55);
+}
+
+/*!\test
+ * Timeout during write due to extreme latency (context switch) between time
+ * measurements.
+ */
+void test_send_timeout_without_any_write_is_not_possible(void)
+{
+    static const struct timespec t1 =
+    {
+        .tv_sec = 1,
+        .tv_nsec = 0,
+    };
+
+    static const struct timespec t2 =
+    {
+        .tv_sec = 3,
+        .tv_nsec = 0,
+    };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "SPI write timeout, slave didn't get ready within 1000 ms");
+
+    std::array<uint8_t, 10> buffer;
+    buffer.fill(0x55);
+
+    cppcut_assert_equal(-1,
+                        spi_send_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 1000));
 }
 
 };
