@@ -192,8 +192,6 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
 
         if(ch == DCP_ESCAPE_CHARACTER)
         {
-            ++src_pos;
-
             if(!skip_nops(buffer, buffer_size, &src_pos))
             {
                 *pending_escape_sequence = true;

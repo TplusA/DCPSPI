@@ -318,6 +318,55 @@ void test_read_from_spi(void)
 }
 
 /*!\test
+ * Read some data from SPI slave with escape characters inside.
+ */
+void test_read_escaped_data_from_spi(void)
+{
+    static const std::array<uint8_t, 27> escaped_data =
+    {
+        0x00,                                           /* regular byte */
+        0x01,                                           /* regular byte */
+        0x02,                                           /* regular byte */
+        UINT8_MAX - 1U,                                 /* regular byte */
+        UINT8_MAX,                                      /* NOP */
+
+        DCP_ESCAPE_CHARACTER, 0x00,                     /* escaped regular */
+        DCP_ESCAPE_CHARACTER, 0x01,                     /* escaped NOP */
+        DCP_ESCAPE_CHARACTER, 0x02,                     /* escaped regular */
+        DCP_ESCAPE_CHARACTER, DCP_ESCAPE_CHARACTER,     /* escaped escape */
+        DCP_ESCAPE_CHARACTER, UINT8_MAX - 1U,           /* escaped regular */
+        DCP_ESCAPE_CHARACTER, UINT8_MAX, 0x03,          /* escaped regular (NOP
+                                                         *   is filtered) */
+        UINT8_MAX, UINT8_MAX, UINT8_MAX,                /* evil sequence of */
+        DCP_ESCAPE_CHARACTER, UINT8_MAX, UINT8_MAX,     /*   NOPs and escape */
+        DCP_ESCAPE_CHARACTER, UINT8_MAX, UINT8_MAX,     /*   characters */
+    };
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, escaped_data);
+    expect_spi_transfers(escaped_data.size());
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    std::array<uint8_t, 11> buffer;
+    buffer.fill(0x55);
+
+    cppcut_assert_equal(ssize_t(buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 500));
+
+    static const std::array<uint8_t, 11> expected_content =
+    {
+        0x00, 0x01, 0x02, UINT8_MAX - 1U,
+        0x00, UINT8_MAX, 0x02, DCP_ESCAPE_CHARACTER, UINT8_MAX - 1U, 0x03,
+        DCP_ESCAPE_CHARACTER,
+    };
+
+    cut_assert_equal_memory(expected_content.data(), expected_content.size(),
+                            buffer.data(), buffer.size());
+}
+
+/*!\test
  * Regular happy case: just write some data to SPI slave, no escape character.
  */
 void test_write_to_spi(void)
