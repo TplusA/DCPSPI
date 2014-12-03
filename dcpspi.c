@@ -348,7 +348,7 @@ static void process_transaction(struct dcp_transaction *transaction,
             spi_fill_buffer_from_raw_data(transaction->spi_buffer.buffer,
                                           transaction->spi_buffer.size,
                                           transaction->dcp_buffer.buffer,
-                                          transaction->dcp_buffer.size);
+                                          transaction->dcp_buffer.pos);
 
         msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
                  tr_log_prefix(transaction->state),
