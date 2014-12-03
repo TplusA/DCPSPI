@@ -571,8 +571,8 @@ void test_too_small_buffer_for_escaped_data_with_last_char_is_uint8_max(void)
     cppcut_assert_equal(uint8_t(0x55), dest_buffer[7]);
 }
 
-static int read_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
-                     size_t number_of_fragments)
+static int return_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
+                       size_t number_of_fragments)
 {
     for(size_t f = 0; f < number_of_fragments; ++f)
     {
@@ -612,7 +612,7 @@ void test_timeout_without_any_read_is_not_possible(void)
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
@@ -651,9 +651,9 @@ void test_read_timeout_is_precisely_measured(void)
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
@@ -701,11 +701,11 @@ void test_timeout_overflow_in_struct_timespec(void)
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t4);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
@@ -750,11 +750,11 @@ void test_long_timeout(void)
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t4);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
@@ -785,7 +785,7 @@ void test_send_timeout_without_any_write_is_not_possible(void)
     };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(read_nops);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI write timeout, slave didn't get ready within 1000 ms");
