@@ -89,6 +89,38 @@ class spi_rw_data_t
         set(write_data.data(), N, 0, 0);
     }
 
+  private:
+    template <size_t N>
+    static void fill_write_data(std::array<uint8_t, N> &data, write_nops nops)
+    {
+        switch(nops)
+        {
+          case EXPECT_WRITE_NOPS:
+            data.fill(UINT8_MAX);
+            break;
+
+          case EXPECT_WRITE_ZEROS:
+            data.fill(0);
+            break;
+        }
+    }
+
+    template <size_t N>
+    static void fill_read_data(std::array<uint8_t, N> &data, read_nops nops)
+    {
+        switch(nops)
+        {
+          case EXPECT_READ_NOPS:
+            data.fill(UINT8_MAX);
+            break;
+
+          case EXPECT_READ_ZEROS:
+            data.fill(0);
+            break;
+        }
+    }
+
+  public:
     /*!
      * Several small write transfers with constant answer from slave.
      */
@@ -97,17 +129,7 @@ class spi_rw_data_t
     {
         std::array<uint8_t, N> read_data;
 
-        switch(nops)
-        {
-          case EXPECT_READ_NOPS:
-            read_data.fill(UINT8_MAX);
-            break;
-
-          case EXPECT_READ_ZEROS:
-            read_data.fill(0);
-            break;
-        }
-
+        fill_read_data(read_data, nops);
         set_fragments(write_data.data(), read_data.data(), N);
     }
 
@@ -119,17 +141,7 @@ class spi_rw_data_t
     {
         std::array<uint8_t, N> write_data;
 
-        switch(nops)
-        {
-          case EXPECT_WRITE_NOPS:
-            write_data.fill(UINT8_MAX);
-            break;
-
-          case EXPECT_WRITE_ZEROS:
-            write_data.fill(0);
-            break;
-        }
-
+        fill_write_data(write_data, nops);
         set_fragments(write_data.data(), read_data.data(), N);
     }
 
