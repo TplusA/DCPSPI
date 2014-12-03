@@ -146,6 +146,22 @@ class spi_rw_data_t
     }
 
     /*!
+     * Several small transfers with constant value sent and constant answer
+     * from slave.
+     */
+    template <size_t N>
+    void set(enum write_nops wnops, enum read_nops rnops)
+    {
+        std::array<uint8_t, N> write_data;
+        std::array<uint8_t, N> read_data;
+
+        fill_write_data(write_data, wnops);
+        fill_read_data(read_data, rnops);
+
+        set_fragments(write_data.data(), read_data.data(), N);
+    }
+
+    /*!
      * Full expected transfer specification.
      */
     template <size_t N>
@@ -808,6 +824,87 @@ void test_send_timeout_without_any_write_is_not_possible(void)
     cppcut_assert_equal(-1,
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000));
+}
+
+/*!\test
+ * Before sending data, wait for slave until it gets ready, timeout does not
+ * expire.
+ */
+void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
+{
+    struct timespec t =
+    {
+        .tv_sec = 10,
+        .tv_nsec = 0,
+    };
+
+    /* some NOP transfers while waiting for slave, one transfer per 5 ms */
+    for(int i = 0; i < 5; ++i)
+    {
+        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        t.tv_nsec += 5UL * 1000UL * 1000UL;
+
+        spi_rw_data->set<short_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                  spi_rw_data_t::EXPECT_READ_NOPS);
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    }
+
+    /* slave signals it's ready */
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    expect_spi_slave_gets_ready();
+
+    /* send data bytes */
+    static const std::array<uint8_t, 7> buffer =
+    {
+        0x90, 0x5a, 0xb7, 0xdb, 0xeb, 0x00, 0x4d,
+    };
+
+    spi_rw_data->set(buffer);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cppcut_assert_equal(0,
+                        spi_send_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 100));
+}
+
+/*!\test
+ * Before sending data, wait for slave until timeout expires.
+ */
+void test_send_to_slave_may_fail_due_to_timeout(void)
+{
+    struct timespec t =
+    {
+        .tv_sec = 10,
+        .tv_nsec = 0,
+    };
+
+    /* some NOP transfers while waiting for slave, one transfer per 5 ms */
+    for(int i = 0; i < 20; ++i)
+    {
+        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        t.tv_nsec += 5UL * 1000UL * 1000UL;
+
+        spi_rw_data->set<short_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                  spi_rw_data_t::EXPECT_READ_NOPS);
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    }
+
+    /* send data bytes */
+    static const std::array<uint8_t, 7> not_sent_data =
+    {
+        0x90, 0x5a, 0xb7, 0xdb, 0xeb, 0x00, 0x4d,
+    };
+
+    /* no further SPI transfer takes place for the data, instead a log message
+     * is emitted and an error code is returned */
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "SPI write timeout, slave didn't get ready within 100 ms");
+
+    cppcut_assert_equal(-1,
+                        spi_send_buffer(expected_spi_fd,
+                                        not_sent_data.data(),
+                                        not_sent_data.size(), 100));
 }
 
 };
