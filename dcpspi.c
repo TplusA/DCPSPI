@@ -662,10 +662,10 @@ error_gpio_open:
     spi_close_device(*spi_fd);
 
 error_spi_open:
-    fifo_close_and_delete(*fifo_out_fd, parameters->fifo_out_name);
+    fifo_close_and_delete(fifo_out_fd, parameters->fifo_out_name);
 
 error_fifo_out:
-    fifo_close_and_delete(*fifo_in_fd, parameters->fifo_in_name);
+    fifo_close_and_delete(fifo_in_fd, parameters->fifo_in_name);
     return -1;
 }
 
@@ -790,8 +790,8 @@ int main(int argc, char *argv[])
     msg_info("Terminated, shutting down");
 
     spi_close_device(spi_fd);
-    fifo_close_and_delete(fifo_in_fd, parameters.fifo_in_name);
-    fifo_close_and_delete(fifo_out_fd, parameters.fifo_out_name);
+    fifo_close_and_delete(&fifo_in_fd, parameters.fifo_in_name);
+    fifo_close_and_delete(&fifo_out_fd, parameters.fifo_out_name);
     gpio_close(gpio);
 
     return EXIT_SUCCESS;

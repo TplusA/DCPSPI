@@ -8,7 +8,9 @@ extern "C" {
 #endif
 
 int fifo_create_and_open(const char *devname, bool write_not_read);
-void fifo_close_and_delete(int fd, const char *devname);
+int fifo_open(const char *devname, bool write_not_read);
+void fifo_close_and_delete(int *fd, const char *devname);
+void fifo_close(int *fd);
 
 #ifdef __cplusplus
 }
