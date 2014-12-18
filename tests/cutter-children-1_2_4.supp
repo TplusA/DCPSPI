@@ -15661,12 +15661,12 @@
    fun:g_mutex_lock
    fun:g_print
    obj:/usr/lib/cutter/module/ui/console.so
-   obj:/usr/lib/cutter/module/ui/console.so
-   obj:/usr/lib/cutter/module/ui/console.so
    fun:g_closure_invoke
    obj:/usr/lib/x86_64-linux-gnu/libgobject-2.0.so*
    fun:g_signal_emit_valist
    fun:g_signal_emit_by_name
+   fun:cut_run_context_emit_complete_run
+   fun:cut_runner_run
 }
 {
    <insert_a_suppression_name_here>
@@ -15809,4 +15809,21 @@
    fun:g_object_new
    fun:cut_backtrace_entry_new
    fun:cut_test_context_push_backtrace
+}
+{
+   <insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:calloc
+   fun:g_malloc0
+   obj:/lib/x86_64-linux-gnu/libglib-2.0.so.0.4002.0
+   obj:/lib/x86_64-linux-gnu/libglib-2.0.so.0.4002.0
+   obj:/lib/x86_64-linux-gnu/libglib-2.0.so.0.4002.0
+   fun:g_main_context_dispatch
+   obj:/lib/x86_64-linux-gnu/libglib-2.0.so.0.4002.0
+   fun:g_main_loop_run
+   obj:/usr/lib/x86_64-linux-gnu/libgio-2.0.so.0.4002.0
+   obj:/lib/x86_64-linux-gnu/libglib-2.0.so.0.4002.0
+   fun:start_thread
+   fun:clone
 }

@@ -130,19 +130,16 @@ static int fill_buffer_from_fd(struct buffer *buffer, size_t count, int fd)
 static ssize_t send_buffer_to_fd(struct buffer *buffer,
                                  size_t offset, size_t count, int fd)
 {
+    errno = 0;
+
     ssize_t len = write(fd, buffer->buffer + offset, count);
 
-    if(len >= 0)
-    {
-        if(len == 0)
-            msg_error(errno, LOG_NOTICE,
-                      "Written partial buffer to named pipe %d", fd);
-
+    if(len > 0)
         return len;
-    }
 
     msg_error(errno, LOG_EMERG,
-              "Failed writing %zu bytes to fd %d", count, fd);
+              "Failed writing %zu bytes to fd %d (write() returned %zd)",
+              count, fd, len);
     return -1;
 }
 
