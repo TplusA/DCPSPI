@@ -12,7 +12,6 @@
 #include <poll.h>
 #include <signal.h>
 #include <errno.h>
-#include <assert.h>
 
 #include "spi.h"
 #include "named_pipe.h"
@@ -345,7 +344,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
       case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
-        assert(transaction->pending_size_of_transaction == 0);
+        log_assert(transaction->pending_size_of_transaction == 0);
 
         clear_buffer(&transaction->spi_buffer);
         transaction->spi_buffer.pos =

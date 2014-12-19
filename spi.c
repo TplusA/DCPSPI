@@ -4,7 +4,6 @@
 
 #include <string.h>
 #include <errno.h>
-#include <assert.h>
 
 #include "spi.h"
 #include "spi_hw.h"
@@ -313,7 +312,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
     while(output_buffer_pos < length)
     {
-        assert(spi_read_globals.input_buffer_pos == 0);
+        log_assert(spi_read_globals.input_buffer_pos == 0);
 
         /* read a few bytes from SPI into our buffer (with escape characters
          * removed); keep them around for potential extra bytes that have been
@@ -352,7 +351,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         }
 
         /* got something */
-        assert((size_t)chunk_size <= sizeof(spi_read_globals.input_buffer));
+        log_assert((size_t)chunk_size <= sizeof(spi_read_globals.input_buffer));
 
         reset_timeout = true;
 
