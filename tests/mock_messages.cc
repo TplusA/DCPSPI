@@ -24,14 +24,28 @@ class MockMessages::Expectation
     const int priority_;
 
     const bool is_format_string_;
+    const bool is_complete_string_;
     const std::string string_;
+    const std::string suffix_;
 
     explicit Expectation(int error_code, int priority,
                          const char *string, bool is_format_string):
         error_code_(error_code),
         priority_(priority),
         is_format_string_(is_format_string),
+        is_complete_string_(true),
         string_(string)
+    {}
+
+    explicit Expectation(int error_code, int priority,
+                         const char *prefix, const char *suffix,
+                         bool is_format_string):
+        error_code_(error_code),
+        priority_(priority),
+        is_format_string_(is_format_string),
+        is_complete_string_(false),
+        string_(prefix),
+        suffix_(suffix)
     {}
 
     Expectation(Expectation &&) = default;
@@ -67,6 +81,12 @@ void MockMessages::expect_msg_error_formatted(int error_code, int priority,
     expectations_->add(Expectation(error_code, priority, string, false));
 }
 
+void MockMessages::expect_msg_error_formatted(int error_code, int priority,
+                                              const char *prefix, const char *suffix)
+{
+    expectations_->add(Expectation(error_code, priority, prefix, suffix, false));
+}
+
 void MockMessages::expect_msg_error(int error_code, int priority,
                                     const char *string)
 {
@@ -86,6 +106,18 @@ void MockMessages::expect_msg_info(const char *string)
 
 MockMessages *mock_messages_singleton = nullptr;
 
+static void check_prefix_and_suffix(const std::string &expected_prefix,
+                                    const std::string &expected_suffix,
+                                    const char *string)
+{
+    size_t string_length = strlen(string);
+
+    cppcut_assert_operator(expected_prefix.length() + expected_suffix.length(), <=, string_length);
+    cppcut_assert_equal(expected_prefix, std::string(string, expected_prefix.length()));
+    cppcut_assert_equal(expected_suffix, std::string(string + string_length - expected_suffix.length(),
+                                                     expected_suffix.length()));
+}
+
 static void check_message_expectation(int error_code, int priority,
                                       const char *format_string, va_list va)
 {
@@ -96,7 +128,11 @@ static void check_message_expectation(int error_code, int priority,
 
     if(expect.is_format_string_)
     {
-        cppcut_assert_equal(expect.string_, std::string(format_string));
+        if(expect.is_complete_string_)
+            cppcut_assert_equal(expect.string_, std::string(format_string));
+        else
+            check_prefix_and_suffix(expect.string_, expect.suffix_, format_string);
+
         return;
     }
 
@@ -107,7 +143,10 @@ static void check_message_expectation(int error_code, int priority,
         snprintf(buffer + len, sizeof(buffer) - len,
                  " (%s)", strerror(error_code));
 
-    cppcut_assert_equal(expect.string_, std::string(buffer));
+    if(expect.is_complete_string_)
+        cppcut_assert_equal(expect.string_, std::string(buffer));
+    else
+        check_prefix_and_suffix(expect.string_, expect.suffix_, buffer);
 }
 
 void msg_enable_syslog(bool enable_syslog) {}

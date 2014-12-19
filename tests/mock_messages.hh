@@ -24,6 +24,7 @@ class MockMessages
     void check() const;
 
     void expect_msg_error_formatted(int error_code, int priority, const char *string);
+    void expect_msg_error_formatted(int error_code, int priority, const char *prefix, const char *suffix);
     void expect_msg_error(int error_code, int priority, const char *string);
     void expect_msg_info_formatted(const char *string);
     void expect_msg_info(const char *string);
