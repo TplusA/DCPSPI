@@ -68,6 +68,7 @@ struct dcp_transaction
     struct buffer spi_buffer;
 
     uint16_t pending_size_of_transaction;
+    size_t flush_to_dcpd_buffer_pos;
     bool pending_escape_sequence_in_spi_buffer;
 };
 
@@ -140,7 +141,7 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
     msg_error(errno, LOG_EMERG,
               "Failed writing %zu bytes to fd %d (write() returned %zd)",
               count, fd, len);
-    return -1;
+    return len < 0 ? -1 : 0;
 }
 
 static void reset_transaction(struct dcp_transaction *transaction)
@@ -151,6 +152,7 @@ static void reset_transaction(struct dcp_transaction *transaction)
 
     clear_buffer(&transaction->dcp_buffer);
     transaction->pending_size_of_transaction = 0;
+    transaction->flush_to_dcpd_buffer_pos = 0;
 
     clear_buffer(&transaction->spi_buffer);
 }
@@ -235,8 +237,9 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     const size_t read_size = compute_read_size(transaction);
     const int bytes_read =
         (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
-        ? spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer, read_size,
-                          spi_timeout_ms)
+        ? spi_read_buffer(spi_fd,
+                          transaction->dcp_buffer.buffer + transaction->dcp_buffer.pos,
+                          read_size, spi_timeout_ms)
         : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
 
     if(bytes_read < 0)
@@ -247,6 +250,9 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
         return;
     }
 
+    if(transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
+        transaction->dcp_buffer.pos += bytes_read;
+
     transaction->pending_size_of_transaction -= (size_t)bytes_read;
     msg_info("%s: still pending %u", tr_log_prefix(transaction->state),
              transaction->pending_size_of_transaction);
@@ -255,6 +261,7 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
        is_buffer_full(&transaction->dcp_buffer))
     {
         msg_info("%s: flush buffer to %s", tr_log_prefix(transaction->state), write_peer);
+        transaction->flush_to_dcpd_buffer_pos = 0;
         if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD)
             transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
         else if(transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD)
@@ -403,15 +410,15 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
       case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
-        msg_info("%s: send %zu bytes answer to DCPD (%u pending)",
+        msg_info("%s: send %zu bytes answer to DCPD (%zu pending)",
                  tr_log_prefix(transaction->state),
                  transaction->dcp_buffer.pos,
-                 transaction->pending_size_of_transaction);
+                 transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos);
 
         ssize_t sent_bytes =
             send_buffer_to_fd(&transaction->dcp_buffer,
-                              transaction->dcp_buffer.pos - transaction->pending_size_of_transaction,
-                              transaction->pending_size_of_transaction,
+                              transaction->flush_to_dcpd_buffer_pos,
+                              transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos,
                               fifo_out_fd);
 
         if(sent_bytes < 0)
@@ -422,9 +429,9 @@ static void process_transaction(struct dcp_transaction *transaction,
             break;
         }
 
-        transaction->pending_size_of_transaction -= sent_bytes;
+        transaction->flush_to_dcpd_buffer_pos += sent_bytes;
 
-        if(transaction->pending_size_of_transaction == 0)
+        if(transaction->flush_to_dcpd_buffer_pos >= transaction->dcp_buffer.pos)
         {
             if(transaction->state == TR_SLAVE_READCMD_FORWARDING_TO_DCPD)
             {
