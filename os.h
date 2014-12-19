@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 int os_clock_gettime(clockid_t clk_id, struct timespec *tp);
+void os_abort(void);
 
 #ifdef __cplusplus
 }

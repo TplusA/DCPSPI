@@ -23,6 +23,8 @@ class MockOs
     typedef int (*os_clock_gettime_callback_t)(clockid_t clk_id, struct timespec *tp);
     void expect_os_clock_gettime(int ret, clockid_t clk_id, const struct timespec &ret_tp);
     void expect_os_clock_gettime_callback(os_clock_gettime_callback_t fn);
+
+    void expect_os_abort(void);
 };
 
 extern MockOs *mock_os_singleton;
