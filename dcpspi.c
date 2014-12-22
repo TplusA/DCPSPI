@@ -44,6 +44,9 @@ enum transaction_state
     TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD,    /*!< Reading header from DCP process. */
     TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD,      /*!< Reading data from DCP process. */
     TR_SLAVE_READCMD_FORWARDING_TO_SLAVE,           /*!< Sending answer to slave over SPI. */
+
+    /* any slave request */
+    TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT,             /*!< Wait for slave to deassert request. */
 };
 
 /*!
@@ -54,6 +57,13 @@ struct buffer
     uint8_t *const buffer;
     const size_t size;
     size_t pos;
+};
+
+enum slave_request_line_state_t
+{
+    REQ_NOT_REQUESTED = 0,
+    REQ_ASSERTED,
+    REQ_DEASSERTED,
 };
 
 /*!
@@ -69,6 +79,8 @@ struct dcp_transaction
     uint16_t pending_size_of_transaction;
     size_t flush_to_dcpd_buffer_pos;
     bool pending_escape_sequence_in_spi_buffer;
+
+    enum slave_request_line_state_t request_state;
 };
 
 /*!
@@ -143,7 +155,7 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
     return len < 0 ? -1 : 0;
 }
 
-static void reset_transaction(struct dcp_transaction *transaction)
+static void reset_transaction_struct(struct dcp_transaction *transaction)
 {
     msg_info("## Reset transaction");
 
@@ -154,6 +166,39 @@ static void reset_transaction(struct dcp_transaction *transaction)
     transaction->flush_to_dcpd_buffer_pos = 0;
 
     clear_buffer(&transaction->spi_buffer);
+
+    transaction->request_state = REQ_NOT_REQUESTED;
+}
+
+static void reset_transaction(struct dcp_transaction *transaction)
+{
+    switch(transaction->state)
+    {
+      case TR_IDLE:
+      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
+        break;
+
+      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
+      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
+      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
+      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
+      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
+      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
+      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
+        if(transaction->request_state == REQ_ASSERTED)
+        {
+            msg_info("End of transaction, waiting for slave to release request line");
+            transaction->state = TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT;
+            return;
+        }
+
+        break;
+    }
+
+    reset_transaction_struct(transaction);
 }
 
 static uint8_t get_dcp_command_type(uint8_t dcp_header_first_byte)
@@ -204,6 +249,7 @@ static const char *tr_log_prefix(enum transaction_state state)
         return "Master write transaction";
 
       case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
+      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
         return "Slave transaction";
 
       case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
@@ -272,21 +318,28 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
 
 static void process_transaction(struct dcp_transaction *transaction,
                                 int fifo_in_fd, int fifo_out_fd,
-                                int spi_fd, unsigned int spi_timeout_ms,
-                                bool is_slave_request)
+                                int spi_fd, unsigned int spi_timeout_ms)
 {
     switch(transaction->state)
     {
       case TR_IDLE:
-        if(is_slave_request)
+        switch(transaction->request_state)
         {
+          case REQ_NOT_REQUESTED:
+            transaction->state = TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD;
+            msg_info("%s: begin (assuming write command)", tr_log_prefix(transaction->state));
+            break;
+
+          case REQ_ASSERTED:
             transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
             msg_info("%s: begin", tr_log_prefix(transaction->state));
-            break;
-        }
+            return;
 
-        transaction->state = TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD;
-        msg_info("%s: begin (assuming write command)", tr_log_prefix(transaction->state));
+          case REQ_DEASSERTED:
+            msg_info("No transaction to process");
+            reset_transaction_struct(transaction);
+            return;
+        }
 
         /* fall-through */
 
@@ -444,7 +497,52 @@ static void process_transaction(struct dcp_transaction *transaction,
             }
         }
         break;
+
+      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
+        reset_transaction(transaction);
+        break;
     }
+}
+
+static void process_request_line(struct dcp_transaction *transaction,
+                                 int fifo_in_fd, int fifo_out_fd,
+                                 int spi_fd, unsigned int spi_timeout_ms,
+                                 const struct gpio_handle *const gpio,
+                                 bool *prev_gpio_state)
+{
+    bool current_gpio_state = gpio_is_active(gpio);
+
+    if(current_gpio_state)
+    {
+        if(transaction->state == TR_IDLE)
+        {
+            log_assert(transaction->request_state == REQ_NOT_REQUESTED);
+
+            /* assertion of request line starts slave transaction */
+            transaction->request_state = REQ_ASSERTED;
+            process_transaction(transaction, fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms);
+        }
+        else if(transaction->request_state == REQ_DEASSERTED &&
+                current_gpio_state != *prev_gpio_state)
+            msg_info("New slave request during ongoing transaction");
+    }
+    else if(transaction->request_state == REQ_ASSERTED)
+    {
+        log_assert(transaction->state != TR_IDLE);
+
+        /* deassertion of request line signals that slave is ready for
+         * next transaction after this one has been completed */
+        transaction->request_state = REQ_DEASSERTED;
+    }
+    else if(transaction->request_state == REQ_DEASSERTED)
+    {
+        log_assert(transaction->state != TR_IDLE);
+        if(current_gpio_state != *prev_gpio_state)
+            msg_info("Lost slave request during ongoing transaction");
+    }
+
+    *prev_gpio_state = current_gpio_state;
 }
 
 static void wait_for_dcp_data(struct dcp_transaction *transaction,
@@ -452,7 +550,7 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
                               const int spi_fd, unsigned int spi_timeout_ms,
                               const int gpio_fd,
                               const struct gpio_handle *const gpio,
-                              bool *gpio_active_state)
+                              bool *prev_gpio_state)
 {
     struct pollfd fds[2] =
     {
@@ -481,7 +579,8 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     }
 
     if(fds[0].revents & POLLPRI)
-        *gpio_active_state = gpio_is_active(gpio);
+        process_request_line(transaction, fifo_in_fd, fifo_out_fd,
+                             spi_fd, spi_timeout_ms, gpio, prev_gpio_state);
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
         msg_error(0, LOG_WARNING,
@@ -498,7 +597,7 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     {
         if(expecting_dcp_data(transaction))
             process_transaction(transaction, fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, *gpio_active_state);
+                                spi_fd, spi_timeout_ms);
         else
             /* FIXME: the DCP process needs to know about this */
             msg_info("collision: DCP tries to send command in the middle of a transaction");
@@ -508,30 +607,6 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
         msg_error(0, LOG_WARNING,
                   "Unexpected poll() events on fifo_fd %d: %04x",
                   fifo_in_fd, fds[1].revents);
-}
-
-static bool process_slave_request(struct dcp_transaction *transaction,
-                                  int fifo_in_fd, int fifo_out_fd,
-                                  int spi_fd, unsigned int spi_timeout_ms,
-                                  bool previous_state, bool new_state)
-{
-    if(previous_state == new_state)
-        return previous_state;
-
-    if(new_state)
-    {
-        if(transaction->state != TR_IDLE)
-        {
-            msg_error(0, LOG_WARNING,
-                      "Got slave request while processing DCP transaction.");
-            return previous_state;
-        }
-
-        process_transaction(transaction, fifo_in_fd, fifo_out_fd,
-                            spi_fd, spi_timeout_ms, new_state);
-    }
-
-    return new_state;
 }
 
 /*!
@@ -584,35 +659,25 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
         },
     };
 
-    reset_transaction(&transaction);
+    reset_transaction_struct(&transaction);
 
     static const unsigned int spi_timeout_ms = 1000;
 
     const int gpio_fd = gpio_get_poll_fd(gpio);
-    bool gpio_active_state = gpio_is_active(gpio);
-
-    if(gpio_active_state)
-        process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
-                            spi_fd, spi_timeout_ms, gpio_active_state);
+    bool prev_gpio_state = gpio_is_active(gpio);
 
     while(keep_running)
     {
-        if(expecting_dcp_data(&transaction))
-        {
-            bool new_gpio_state = gpio_active_state;
+        process_request_line(&transaction, fifo_in_fd, fifo_out_fd,
+                             spi_fd, spi_timeout_ms, gpio, &prev_gpio_state);
 
+        if(expecting_dcp_data(&transaction))
             wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd,
                               spi_fd, spi_timeout_ms,
-                              gpio_fd, gpio, &new_gpio_state);
-
-            gpio_active_state =
-                process_slave_request(&transaction, fifo_in_fd, fifo_out_fd,
-                                      spi_fd, spi_timeout_ms,
-                                      gpio_active_state, new_gpio_state);
-        }
+                              gpio_fd, gpio, &prev_gpio_state);
         else
             process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, gpio_active_state);
+                                spi_fd, spi_timeout_ms);
     }
 }
 
