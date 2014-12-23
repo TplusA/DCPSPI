@@ -688,6 +688,7 @@ struct parameters
     const char *spidev_name;
     unsigned int gpio_num;
     bool run_in_foreground;
+    bool gpio_needs_debouncing;
 };
 
 /*!
@@ -727,6 +728,9 @@ static int setup(const struct parameters *parameters,
     if(*gpio == NULL)
         goto error_gpio_open;
 
+    if(parameters->gpio_needs_debouncing)
+        gpio_enable_debouncing(*gpio);
+
     return 0;
 
 error_gpio_open:
@@ -748,7 +752,8 @@ static void usage(const char *program_name)
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
            "  --spidev name  Name of the SPI device.\n"
-           "  --gpio num     Number of the slave request pin.\n",
+           "  --gpio num     Number of the slave request pin.\n"
+           "  --debounce     Enable software debouncing of request pin.\n",
            program_name);
 }
 
@@ -760,6 +765,7 @@ static int process_command_line(int argc, char *argv[],
     parameters->spidev_name = "/dev/spidev0.0";
     parameters->gpio_num = 4;
     parameters->run_in_foreground = false;
+    parameters->gpio_needs_debouncing = false;
 
 #define CHECK_ARGUMENT() \
     do \
@@ -809,6 +815,8 @@ static int process_command_line(int argc, char *argv[],
 
             parameters->gpio_num = temp;
         }
+        else if(strcmp(argv[i], "--debounce") == 0)
+            parameters->gpio_needs_debouncing = true;
         else
         {
             fprintf(stderr, "Unknown option \"%s\". Please try --help.\n", argv[i]);
