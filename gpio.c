@@ -17,6 +17,7 @@ struct gpio_handle
 {
     bool is_in_use;
     bool is_active_low;
+    bool is_debouncing_enabled;
     unsigned int gpio_num;
     int value_fd;
 };
@@ -179,6 +180,7 @@ struct gpio_handle *gpio_open(unsigned int gpio_num, bool is_active_low)
         return NULL;
 
     the_gpio.is_active_low = is_active_low;
+    the_gpio.is_debouncing_enabled = false;
     the_gpio.gpio_num = gpio_num;
     the_gpio.is_in_use = true;
 
@@ -223,22 +225,31 @@ static bool sample_gpio_value(const struct gpio_handle *gpio)
 
 bool gpio_is_active(const struct gpio_handle *gpio)
 {
-    static const int debounce_count = 10;
-
-    int debounce = debounce_count;
     bool value = sample_gpio_value(gpio);
 
-    while(--debounce > 0)
+    if(gpio->is_debouncing_enabled)
     {
-        usleep(5000);
+        static const int debounce_count = 10;
 
-        bool temp = sample_gpio_value(gpio);
-        if(temp != value)
+        int debounce = debounce_count;
+
+        while(--debounce > 0)
         {
-            value = temp;
-            debounce = debounce_count;
+            usleep(5000);
+
+            bool temp = sample_gpio_value(gpio);
+            if(temp != value)
+            {
+                value = temp;
+                debounce = debounce_count;
+            }
         }
     }
 
     return gpio->is_active_low ? !value : value;
+}
+
+void gpio_enable_debouncing(struct gpio_handle *gpio)
+{
+    gpio->is_debouncing_enabled = true;
 }
