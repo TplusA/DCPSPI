@@ -345,7 +345,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
       case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
-        msg_info("%s: receiving command header", tr_log_prefix(transaction->state));
+        msg_info("%s: receiving command header from DCPD", tr_log_prefix(transaction->state));
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
                                DCP_HEADER_SIZE - transaction->dcp_buffer.pos,
                                fifo_in_fd) < 0)
@@ -421,7 +421,7 @@ static void process_transaction(struct dcp_transaction *transaction,
         break;
 
       case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-        msg_info("%s: receiving command header", tr_log_prefix(transaction->state));
+        msg_info("%s: receiving command header from slave", tr_log_prefix(transaction->state));
         if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
                            DCP_HEADER_SIZE, spi_timeout_ms) < DCP_HEADER_SIZE)
         {
