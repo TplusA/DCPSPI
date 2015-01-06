@@ -53,6 +53,14 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms);
 
 /*!
+ * Begin new transaction, clear internal receive buffer.
+ *
+ * This just calls #spi_reset(), but it also prints a log message in case there
+ * were any bytes left in the input buffer.
+ */
+void spi_new_transaction(void);
+
+/*!
  * Reset internal state.
  *
  * In case of emergency during error recovery and for unit tests.

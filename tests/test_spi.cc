@@ -795,6 +795,90 @@ void test_long_timeout(void)
 }
 
 /*!\test
+ * Two transactions initiated by the slave device.
+ *
+ * This test mimicks two SPI slave transfers by calling the involved low level
+ * functions directly in the expected order. The slave incorrectly sends zeros
+ * instead of NOPs after sending the actual command bytes. Our internal read
+ * buffer is filled with these zeros, so #spi_new_transaction() must be called
+ * upon begin of any slave request.
+ *
+ * \note
+ *     Some refactoring of the production code should be done to make the real
+ *     transaction code testable.
+ */
+void test_new_spi_slave_transaction_clears_internal_receive_buffer(void)
+{
+    static const std::array<uint8_t, short_spi_transfer_size> slave_request_data[2] =
+    {
+        {
+            0x02, 0x48, 0x01, 0x00, 0x28, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        },
+        {
+            0x02, 0x48, 0x01, 0x00, 0x26, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        }
+    };
+
+    static const struct timespec t =
+    {
+        .tv_sec = 0,
+        .tv_nsec = 0,
+    };
+
+    for(size_t i = 0;
+        i < sizeof(slave_request_data) / sizeof(slave_request_data[0]);
+        ++i)
+    {
+        if(i > 0)
+            mock_messages->expect_msg_info_formatted("Discarding 27 bytes from SPI receive buffer");
+
+        spi_new_transaction();
+
+        auto &req(slave_request_data[i]);
+
+        spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, req);
+
+        /* read DCP header */
+        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+        std::array<uint8_t, 4> command_header_buffer;
+
+        cppcut_assert_equal(ssize_t(command_header_buffer.size()),
+                            spi_read_buffer(expected_spi_fd,
+                                            command_header_buffer.data(),
+                                            command_header_buffer.size(),
+                                            10));
+        cut_assert_equal_memory(req.data(),
+                                command_header_buffer.size(),
+                                command_header_buffer.data(),
+                                command_header_buffer.size());
+
+        /* read DRCP command code (comes from internal buffer, no SPI transfer is
+         * done here) */
+        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+        std::array<uint8_t, 1> drcp_command_buffer;
+
+        cppcut_assert_equal(ssize_t(drcp_command_buffer.size()),
+                            spi_read_buffer(expected_spi_fd,
+                                            drcp_command_buffer.data(),
+                                            drcp_command_buffer.size(),
+                                            10));
+        cut_assert_equal_memory(req.data() + command_header_buffer.size(),
+                                drcp_command_buffer.size(),
+                                drcp_command_buffer.data(),
+                                drcp_command_buffer.size());
+    }
+}
+
+/*!\test
  * Timeout during write due to extreme latency (context switch) between time
  * measurements.
  */

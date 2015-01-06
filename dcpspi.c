@@ -333,6 +333,7 @@ static void process_transaction(struct dcp_transaction *transaction,
           case REQ_ASSERTED:
             transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
             msg_info("%s: begin", tr_log_prefix(transaction->state));
+            spi_new_transaction();
             return;
 
           case REQ_DEASSERTED:

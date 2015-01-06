@@ -366,6 +366,15 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
     return output_buffer_pos;
 }
 
+void spi_new_transaction(void)
+{
+    if(spi_read_globals.input_buffer_pos > 0)
+        msg_info("Discarding %zu bytes from SPI receive buffer",
+                 spi_read_globals.input_buffer_pos);
+
+    spi_reset();
+}
+
 void spi_reset(void)
 {
     memset(&spi_read_globals, 0, sizeof(spi_read_globals));
