@@ -67,6 +67,11 @@ void spi_new_transaction(void);
  */
 void spi_reset(void);
 
+/*!
+ * Set clock speed for SPI transfers in Hz.
+ */
+void spi_set_speed_hz(uint32_t hz);
+
 #ifdef __cplusplus
 }
 #endif

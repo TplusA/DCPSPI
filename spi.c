@@ -14,7 +14,7 @@
 /*!
  * SPI speed in Hz for all transfers.
  */
-static const uint32_t spi_speed_hz = 128000U;
+static uint32_t spi_speed_hz = 128000U;
 
 /*!
  * Kernel spidev driver defaults to writing hard-coded 0's in case we
@@ -378,4 +378,10 @@ void spi_new_transaction(void)
 void spi_reset(void)
 {
     memset(&spi_read_globals, 0, sizeof(spi_read_globals));
+}
+
+void spi_set_speed_hz(uint32_t hz)
+{
+    if(hz > 0)
+        spi_speed_hz = hz;
 }
