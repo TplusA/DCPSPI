@@ -687,6 +687,7 @@ struct parameters
     const char *fifo_in_name;
     const char *fifo_out_name;
     const char *spidev_name;
+    uint32_t spi_clock;
     unsigned int gpio_num;
     bool run_in_foreground;
     bool gpio_needs_debouncing;
@@ -732,6 +733,8 @@ static int setup(const struct parameters *parameters,
     if(parameters->gpio_needs_debouncing)
         gpio_enable_debouncing(*gpio);
 
+    spi_set_speed_hz(parameters->spi_clock);
+
     return 0;
 
 error_gpio_open:
@@ -753,6 +756,7 @@ static void usage(const char *program_name)
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
            "  --spidev name  Name of the SPI device.\n"
+           "  --spiclk hz    Clock frequency on SPI bus.\n"
            "  --gpio num     Number of the slave request pin.\n"
            "  --debounce     Enable software debouncing of request pin.\n",
            program_name);
@@ -764,6 +768,7 @@ static int process_command_line(int argc, char *argv[],
     parameters->fifo_in_name = "/tmp/dcp_to_spi";
     parameters->fifo_out_name = "/tmp/spi_to_dcp";
     parameters->spidev_name = "/dev/spidev0.0";
+    parameters->spi_clock = 0;
     parameters->gpio_num = 4;
     parameters->run_in_foreground = false;
     parameters->gpio_needs_debouncing = false;
@@ -800,6 +805,21 @@ static int process_command_line(int argc, char *argv[],
         {
             CHECK_ARGUMENT();
             parameters->spidev_name = argv[i];
+        }
+        else if(strcmp(argv[i], "--spiclk") == 0)
+        {
+            CHECK_ARGUMENT();
+
+            char *endptr;
+            unsigned long temp = strtoul(argv[i], &endptr, 10);
+
+            if(*endptr != '\0' || temp > UINT32_MAX || (temp == ULONG_MAX && errno == ERANGE))
+            {
+                fprintf(stderr, "Invalid value \"%s\". Please try --help.\n", argv[i]);
+                return -1;
+            }
+
+            parameters->spi_clock = temp;
         }
         else if(strcmp(argv[i], "--gpio") == 0)
         {
