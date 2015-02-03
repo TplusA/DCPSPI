@@ -1,5 +1,17 @@
 # Filter for receiving and transmitting DCP over SPI
 
+## Copyright and contact
+
+DCPSPI is released under the terms of the GNU General Public License version 3
+(GPLv3). See file <tt>COPYING</tt> for licensing terms.
+
+Contact:
+
+    T+A elektroakustik GmbH & Co. KG
+    Planckstrasse 11
+    32052 Herford
+    Germany
+
 ## Short description
 
 _dcpspi_ is a simple daemon that acts as a proxy between a <tt>/dev/spidev</tt>
