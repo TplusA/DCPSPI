@@ -98,10 +98,16 @@ or end of transmission.
 
 ## Configuration
 
-The _dcpspi_ requires configuration of the following parameters:
+The _dcpspi_ daemon requires configuration of the following parameters:
 
 - name of the spidev device;
 - name of the named pipe; and
 - name of the interrupt GPIO.
 
 These are passed as command line parameters.
+
+## Permissions
+
+The _dcpspi_ daemon reads from and writes to a `/dev/spidev` device and
+requires permission for this. It also requires permission to export a GPIO via
+`sysfs` and to configure and use it.
