@@ -6,4 +6,6 @@
 /config/
 /configure
 /m4/
+/cscope.out
+/tags
 Makefile.in
