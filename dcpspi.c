@@ -655,6 +655,21 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
  * - Read optional data from DCPD
  * - Transform for SPI (insert escape sequences)
  * - Send transformed data to SPI
+ *
+ * \param fifo_in_fd
+ *     File descriptor of the ingoing named pipe that DCPD is supposed to
+ *     connect to for writing to us.
+ *
+ * \param fifo_out_fd
+ *     File descriptor of the outgoing named pipe that DCPD is supposed to
+ *     connect to for reading from us.
+ *
+ * \param spi_fd
+ *     File descriptor of the SPI interface.
+ *
+ * \param gpio
+ *     Structure that represents the request input pin the slave device is
+ *     supposed to use for requesting data and data rate limitation.
  */
 static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
                       const int spi_fd, const struct gpio_handle *const gpio)
