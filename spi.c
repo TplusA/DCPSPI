@@ -143,6 +143,12 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
                     unsigned int timeout_ms)
 {
+    if(fd < 0)
+    {
+        /* operating in dummy mode */
+        return 0;
+    }
+
     if(wait_for_spi_slave(fd, timeout_ms) < 0)
         return -1;
 

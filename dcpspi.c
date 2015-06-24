@@ -697,13 +697,14 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 
     static const unsigned int spi_timeout_ms = 1000;
 
-    const int gpio_fd = gpio_get_poll_fd(gpio);
-    bool prev_gpio_state = gpio_is_active(gpio);
+    const int gpio_fd = gpio != NULL ? gpio_get_poll_fd(gpio) : -1;
+    bool prev_gpio_state = gpio != NULL ? gpio_is_active(gpio) : false;
 
     while(keep_running)
     {
-        process_request_line(&transaction, fifo_in_fd, fifo_out_fd,
-                             spi_fd, spi_timeout_ms, gpio, &prev_gpio_state);
+        if(gpio != NULL)
+            process_request_line(&transaction, fifo_in_fd, fifo_out_fd,
+                                 spi_fd, spi_timeout_ms, gpio, &prev_gpio_state);
 
         if(expecting_dcp_data(&transaction))
             wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd,
@@ -731,7 +732,8 @@ struct parameters
  */
 static int setup(const struct parameters *parameters,
                  int *fifo_in_fd, int *fifo_out_fd,
-                 int *spi_fd, struct gpio_handle **gpio)
+                 int *spi_fd, struct gpio_handle **gpio,
+                 bool dummy_mode)
 {
     msg_enable_syslog(!parameters->run_in_foreground);
 
@@ -754,6 +756,13 @@ static int setup(const struct parameters *parameters,
     *fifo_out_fd = fifo_create_and_open(parameters->fifo_out_name, true);
     if(*fifo_out_fd < 0)
         goto error_fifo_out;
+
+    if(dummy_mode)
+    {
+        *spi_fd = -1;
+        *gpio = NULL;
+        return 0;
+    }
 
     *spi_fd = spi_open_device(parameters->spidev_name);
     if(*spi_fd < 0)
@@ -902,10 +911,12 @@ int main(int argc, char *argv[])
         return EXIT_SUCCESS;
     }
 
+    static const bool dummy_mode = false;
+
     int fifo_in_fd, fifo_out_fd, spi_fd;
     struct gpio_handle *gpio;
 
-    if(setup(&parameters, &fifo_in_fd, &fifo_out_fd, &spi_fd, &gpio) < 0)
+    if(setup(&parameters, &fifo_in_fd, &fifo_out_fd, &spi_fd, &gpio, dummy_mode) < 0)
         return EXIT_FAILURE;
 
     static struct sigaction action =
@@ -922,10 +933,14 @@ int main(int argc, char *argv[])
 
     msg_info("Terminated, shutting down");
 
-    spi_close_device(spi_fd);
+    if(!dummy_mode)
+        spi_close_device(spi_fd);
+
     fifo_close_and_delete(&fifo_in_fd, parameters.fifo_in_name);
     fifo_close_and_delete(&fifo_out_fd, parameters.fifo_out_name);
-    gpio_close(gpio);
+
+    if(!dummy_mode)
+        gpio_close(gpio);
 
     return EXIT_SUCCESS;
 }
