@@ -21,12 +21,21 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <stdlib.h>
+#include <errno.h>
 
 #include "os.h"
 
 int os_clock_gettime(clockid_t clk_id, struct timespec *tp)
 {
     return clock_gettime(clk_id, tp);
+}
+
+void os_nanosleep(const struct timespec *tp)
+{
+    struct timespec remaining = *tp;
+
+    while(nanosleep(&remaining, &remaining) == -1 && errno == EINTR)
+        ;
 }
 
 void os_abort(void)

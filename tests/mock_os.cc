@@ -27,6 +27,7 @@
 enum class OsFn
 {
     os_clock_gettime_fn,
+    os_nanosleep_fn,
     stdlib_abort,
 
     first_valid_os_fn_id = os_clock_gettime_fn,
@@ -49,6 +50,10 @@ static std::ostream &operator<<(std::ostream &os, const OsFn id)
         os << "os_clock_gettime";
         break;
 
+      case OsFn::os_nanosleep_fn:
+        os << "os_nanosleep";
+        break;
+
       case OsFn::stdlib_abort:
         os << "abort";
         break;
@@ -66,7 +71,7 @@ class MockOs::Expectation
 
     const int ret_code_;
     clockid_t arg_clk_id_;
-    const struct timespec ret_tp_;
+    const struct timespec timespec_;
     os_clock_gettime_callback_t os_clock_gettime_callback_;
 
     Expectation(const Expectation &) = delete;
@@ -76,7 +81,7 @@ class MockOs::Expectation
         function_id_(OsFn::os_clock_gettime_fn),
         ret_code_(ret),
         arg_clk_id_(clk_id),
-        ret_tp_(ret_tp),
+        timespec_(ret_tp),
         os_clock_gettime_callback_(nullptr)
     {}
 
@@ -84,15 +89,23 @@ class MockOs::Expectation
         function_id_(OsFn::os_clock_gettime_fn),
         ret_code_(-5),
         arg_clk_id_(CLOCK_REALTIME_COARSE),
-        ret_tp_({0}),
+        timespec_({0}),
         os_clock_gettime_callback_(fn)
+    {}
+
+    explicit Expectation(const struct timespec &tp):
+        function_id_(OsFn::os_nanosleep_fn),
+        ret_code_(-5),
+        arg_clk_id_(CLOCK_REALTIME_COARSE),
+        timespec_(tp),
+        os_clock_gettime_callback_(nullptr)
     {}
 
     explicit Expectation(OsFn fn_):
         function_id_(fn_),
         ret_code_(-5),
         arg_clk_id_(CLOCK_REALTIME_COARSE),
-        ret_tp_({0}),
+        timespec_({0}),
         os_clock_gettime_callback_(nullptr)
     {}
 
@@ -132,6 +145,22 @@ void MockOs::expect_os_clock_gettime_callback(os_clock_gettime_callback_t fn)
     expectations_->add(Expectation(fn));
 }
 
+void MockOs::expect_os_nanosleep(const struct timespec *tp)
+{
+    expectations_->add(Expectation(*tp));
+}
+
+void MockOs::expect_os_nanosleep(long milliseconds)
+{
+    const struct timespec tp =
+    {
+        .tv_sec = milliseconds / 1000L,
+        .tv_nsec = 1000L * 1000L * (milliseconds % 1000L),
+    };
+
+    expectations_->add(Expectation(tp));
+}
+
 void MockOs::expect_os_abort(void)
 {
     expectations_->add(Expectation(OsFn::stdlib_abort));
@@ -150,8 +179,18 @@ int os_clock_gettime(clockid_t clk_id, struct timespec *tp)
         return expect.os_clock_gettime_callback_(clk_id, tp);
 
     cppcut_assert_equal(expect.arg_clk_id_, clk_id);
-    *tp = expect.ret_tp_;
+    *tp = expect.timespec_;
     return expect.ret_code_;
+}
+
+void os_nanosleep(const struct timespec *tp)
+{
+    const auto &expect(mock_os_singleton->expectations_->get_next_expectation(__func__));
+
+    cppcut_assert_equal(expect.function_id_, OsFn::os_nanosleep_fn);
+
+    cppcut_assert_equal(expect.timespec_.tv_sec, tp->tv_sec);
+    cppcut_assert_equal(expect.timespec_.tv_nsec, tp->tv_nsec);
 }
 
 void os_abort(void)

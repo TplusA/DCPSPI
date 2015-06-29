@@ -145,7 +145,7 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
             .tv_nsec = 30L * 1000L * 1000L,
         };
 
-        (void)nanosleep(&delay_between_slave_ready_probes, NULL);
+        os_nanosleep(&delay_between_slave_ready_probes);
     }
 
     return -1;

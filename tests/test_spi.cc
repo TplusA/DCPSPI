@@ -41,6 +41,7 @@ namespace spi_communication_tests
 static constexpr int expected_spi_fd = 42;
 static constexpr size_t wait_for_slave_spi_transfer_size = 2;
 static constexpr size_t read_from_slave_spi_transfer_size = 32;
+static constexpr unsigned long delay_between_slave_probes_ms = 30;
 
 class spi_rw_data_partial_t
 {
@@ -948,10 +949,15 @@ void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
         .tv_nsec = 0,
     };
 
-    /* some NOP transfers while waiting for slave, one transfer per 5 ms */
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    /* some NOP transfers while waiting for slave, one short transfer per 5 ms
+     * (that is, we do NOT take the real amount of delay into account here,
+     * which would be #delay_between_slave_probes_ms!) */
     for(int i = 0; i < 5; ++i)
     {
         mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
         t.tv_nsec += 5UL * 1000UL * 1000UL;
 
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
@@ -961,7 +967,6 @@ void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
     }
 
     /* slave signals it's ready */
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
     expect_spi_slave_gets_ready();
 
     /* send data bytes */
@@ -989,10 +994,19 @@ void test_send_to_slave_may_fail_due_to_timeout(void)
         .tv_nsec = 0,
     };
 
-    /* some NOP transfers while waiting for slave, one transfer per 5 ms */
-    for(int i = 0; i < 20; ++i)
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    /* some NOP transfers while waiting for slave, one short transfer per 5 ms
+     * (that is, we do NOT take the real amount of delay into account here,
+     * which would be #delay_between_slave_probes_ms!) */
+    for(int i = 0; i < 21; ++i)
     {
         mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+        /* the 21st sleep does not happen because of timeout */
+        if(i < 20)
+            mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
+
         t.tv_nsec += 5UL * 1000UL * 1000UL;
 
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
@@ -1009,7 +1023,6 @@ void test_send_to_slave_may_fail_due_to_timeout(void)
 
     /* no further SPI transfer takes place for the data, instead a log message
      * is emitted and an error code is returned */
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI write timeout, slave didn't get ready within 100 ms");
 
