@@ -24,6 +24,13 @@ dcpspi_LDADD = $(noinst_LTLIBRARIES)
 libspi_la_SOURCES = spi.c spi.h spi_hw.h dcpdefs.h messages.h os.h
 libspi_la_CFLAGS = $(AM_CFLAGS)
 
+BUILT_SOURCES = versioninfo.h
+
+CLEANFILES += $(BUILT_SOURCES)
+
+versioninfo.h: versioninfo.cache
+	(cd $(top_srcdir) && $(AUTOREVISION) -t h -o $(abs_top_builddir)/versioninfo.cache >$(abs_top_builddir)/$@)
+
 .md.html:
 	$(MARKDOWN) $< >$@
 

@@ -37,6 +37,7 @@
 #include "dcpdefs.h"
 #include "messages.h"
 #include "os.h"
+#include "versioninfo.h"
 
 /*!
  * Current state of the DCP transaction.
@@ -100,6 +101,23 @@ struct dcp_transaction
 
     enum slave_request_line_state_t request_state;
 };
+
+static void show_version_info(void)
+{
+    printf("%s\n"
+           "Revision %s%s\n"
+           "         %s+%d, %s\n",
+           PACKAGE_STRING,
+           VCS_FULL_HASH, VCS_WC_MODIFIED ? " (tained)" : "",
+           VCS_TAG, VCS_TICK, VCS_DATE);
+}
+
+static void log_version_info(void)
+{
+    msg_info("Rev %s%s, %s+%d, %s",
+             VCS_FULL_HASH, VCS_WC_MODIFIED ? " (tained)" : "",
+             VCS_TAG, VCS_TICK, VCS_DATE);
+}
 
 /*!
  * Whether or not the DCP process is allowed to send any data.
@@ -749,6 +767,8 @@ static int setup(const struct parameters *parameters,
         }
     }
 
+    log_version_info();
+
     *fifo_in_fd = fifo_create_and_open(parameters->fifo_in_name, false);
     if(*fifo_in_fd < 0)
         return -1;
@@ -795,6 +815,7 @@ static void usage(const char *program_name)
     printf("Usage: %s --fifo name --spidev name --irq gpio\n"
            "\n"
            "Options:\n"
+           "  --version      Print version information to stdout.\n"
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
            "  --spidev name  Name of the SPI device.\n"
@@ -831,6 +852,8 @@ static int process_command_line(int argc, char *argv[],
     {
         if(strcmp(argv[i], "--help") == 0)
             return 1;
+        else if(strcmp(argv[i], "--version") == 0)
+            return 2;
         else if(strcmp(argv[i], "--fg") == 0)
             parameters->run_in_foreground = true;
         else if(strcmp(argv[i], "--ififo") == 0)
@@ -908,6 +931,11 @@ int main(int argc, char *argv[])
     else if(ret == 1)
     {
         usage(argv[0]);
+        return EXIT_SUCCESS;
+    }
+    else if(ret == 2)
+    {
+        show_version_info();
         return EXIT_SUCCESS;
     }
 
