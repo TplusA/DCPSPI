@@ -88,14 +88,17 @@ static bool timeout_expired(const struct timespec *restrict timeout,
 
 static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
 {
-    uint8_t buffer[sizeof(spi_dummy_bytes)];
+    static const size_t slave_ready_probe_size =
+        sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes);
+
+    uint8_t buffer[slave_ready_probe_size];
 
     const struct spi_ioc_transfer spi_transfer[] =
     {
         {
             .tx_buf = (unsigned long)spi_dummy_bytes,
             .rx_buf = (unsigned long)buffer,
-            .len = sizeof(spi_dummy_bytes),
+            .len = sizeof(buffer),
             .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
         },
@@ -135,6 +138,14 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
                       timeout_ms);
             break;
         }
+
+        /* give the slave (and ourselves) a break */
+        static const struct timespec delay_between_slave_ready_probes =
+        {
+            .tv_nsec = 30L * 1000L * 1000L,
+        };
+
+        (void)nanosleep(&delay_between_slave_ready_probes, NULL);
     }
 
     return -1;
