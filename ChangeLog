@@ -1,0 +1,14 @@
+2015-06-30  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.1 released.
+
+	* Reduce SPI traffic while waiting for slave.
+
+2015-06-11  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.0 released.
+
+	* First release for testing.
+
+
+Copyright 2015 T+A elektroakustik GmbH & Co. KG
