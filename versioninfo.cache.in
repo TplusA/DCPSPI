@@ -4,7 +4,7 @@
 
 VCS_TYPE="git"
 VCS_BASENAME="dcpspi"
-VCS_NUM=9
+VCS_NUM=0
 VCS_DATE="1970-01-01T00:00:00+0000"
 VCS_BRANCH="invalid_branch"
 VCS_TAG="invalid_tag"
