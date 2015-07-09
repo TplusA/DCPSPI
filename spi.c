@@ -88,10 +88,7 @@ static bool timeout_expired(const struct timespec *restrict timeout,
 
 static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
 {
-    static const size_t slave_ready_probe_size =
-        sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes);
-
-    uint8_t buffer[slave_ready_probe_size];
+    uint8_t buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
 
     const struct spi_ioc_transfer spi_transfer[] =
     {
