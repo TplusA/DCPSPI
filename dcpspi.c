@@ -73,8 +73,8 @@ enum transaction_state
  */
 struct buffer
 {
-    uint8_t *const buffer;
-    const size_t size;
+    uint8_t *buffer;
+    size_t size;
     size_t pos;
 };
 
@@ -100,6 +100,12 @@ struct dcp_transaction
     bool pending_escape_sequence_in_spi_buffer;
 
     enum slave_request_line_state_t request_state;
+};
+
+struct collision_check_data
+{
+    const struct gpio_handle *const gpio;
+    const struct dcp_transaction *const current_transaction;
 };
 
 static void show_version_info(void)
@@ -141,6 +147,15 @@ static volatile bool keep_running = true;
 static void clear_buffer(struct buffer *buffer)
 {
     buffer->pos = 0;
+}
+
+static void swap_buffers(struct buffer *const first,
+                         struct buffer *const second)
+{
+    const struct buffer temp = *first;
+
+    *first = *second;
+    *second = temp;
 }
 
 static bool is_buffer_full(const struct buffer *buffer)
@@ -352,9 +367,21 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     }
 }
 
+static bool check_slave_request_collision(void *data)
+{
+    const struct collision_check_data *const check_data = data;
+
+    if(check_data->current_transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
+        return gpio_is_active(check_data->gpio);
+    else
+        return false;
+}
+
 static void process_transaction(struct dcp_transaction *transaction,
+                                struct buffer *deferred_transaction_data,
                                 int fifo_in_fd, int fifo_out_fd,
-                                int spi_fd, unsigned int spi_timeout_ms)
+                                int spi_fd, unsigned int spi_timeout_ms,
+                                struct collision_check_data *ccdata)
 {
     switch(transaction->state)
     {
@@ -446,10 +473,29 @@ static void process_transaction(struct dcp_transaction *transaction,
         msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
                  tr_log_prefix(transaction->state),
                  transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
-        if(spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                           transaction->spi_buffer.pos, spi_timeout_ms) < 0)
+        int ret =
+            spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
+                            transaction->spi_buffer.pos, spi_timeout_ms,
+                            check_slave_request_collision, ccdata);
+
+        if(ret < 0)
         {
+            /* hard failure; abort transaction */
             reset_transaction(transaction);
+            break;
+        }
+        else if(ret == 1)
+        {
+            /* collision; process slave request first, schedule transaction
+             * again at some later point */
+            if(transaction->state != TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
+                BUG("Unexpected transaction state");
+
+            if(deferred_transaction_data->pos > 0)
+                BUG("Lost deferred transaction");
+
+            swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
+            transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
             break;
         }
 
@@ -539,15 +585,24 @@ static void process_transaction(struct dcp_transaction *transaction,
         reset_transaction(transaction);
         break;
     }
+
+    if(transaction->state == TR_IDLE && deferred_transaction_data->pos > 0)
+    {
+        msg_info("Continue processing deferred master transaction");
+
+        swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
+        transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
+    }
 }
 
 static void process_request_line(struct dcp_transaction *transaction,
+                                 struct buffer *deferred_transaction_data,
                                  int fifo_in_fd, int fifo_out_fd,
                                  int spi_fd, unsigned int spi_timeout_ms,
-                                 const struct gpio_handle *const gpio,
+                                 struct collision_check_data *ccdata,
                                  bool *prev_gpio_state)
 {
-    bool current_gpio_state = gpio_is_active(gpio);
+    bool current_gpio_state = gpio_is_active(ccdata->gpio);
 
     if(current_gpio_state)
     {
@@ -557,8 +612,9 @@ static void process_request_line(struct dcp_transaction *transaction,
 
             /* assertion of request line starts slave transaction */
             transaction->request_state = REQ_ASSERTED;
-            process_transaction(transaction, fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms);
+            process_transaction(transaction, deferred_transaction_data,
+                                fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, ccdata);
         }
         else if(transaction->request_state == REQ_DEASSERTED &&
                 current_gpio_state != *prev_gpio_state)
@@ -583,10 +639,11 @@ static void process_request_line(struct dcp_transaction *transaction,
 }
 
 static void wait_for_dcp_data(struct dcp_transaction *transaction,
+                              struct buffer *deferred_transaction_data,
                               const int fifo_in_fd, const int fifo_out_fd,
                               const int spi_fd, unsigned int spi_timeout_ms,
                               const int gpio_fd,
-                              const struct gpio_handle *const gpio,
+                              struct collision_check_data *ccdata,
                               bool *prev_gpio_state)
 {
     struct pollfd fds[2] =
@@ -616,8 +673,9 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     }
 
     if(fds[0].revents & POLLPRI)
-        process_request_line(transaction, fifo_in_fd, fifo_out_fd,
-                             spi_fd, spi_timeout_ms, gpio, prev_gpio_state);
+        process_request_line(transaction, deferred_transaction_data,
+                             fifo_in_fd, fifo_out_fd,
+                             spi_fd, spi_timeout_ms, ccdata, prev_gpio_state);
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
         msg_error(0, LOG_WARNING,
@@ -633,8 +691,9 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
     if(fds[1].revents & POLLIN)
     {
         if(expecting_dcp_data(transaction))
-            process_transaction(transaction, fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms);
+            process_transaction(transaction, deferred_transaction_data,
+                                fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, ccdata);
         else
             /* FIXME: the DCP process needs to know about this */
             msg_info("collision: DCP tries to send command in the middle of a transaction");
@@ -694,21 +753,33 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 {
     msg_info("Ready for accepting traffic");
 
-    static uint8_t dcp_backing_buffer[260];
+    static uint8_t dcp_double_buffer[260][2];
     static uint8_t spi_backing_buffer[260 * 2];
 
     struct dcp_transaction transaction =
     {
         .dcp_buffer =
         {
-            .buffer = dcp_backing_buffer,
-            .size = sizeof(dcp_backing_buffer),
+            .buffer = dcp_double_buffer[0],
+            .size = sizeof(dcp_double_buffer[0]),
         },
         .spi_buffer =
         {
             .buffer = spi_backing_buffer,
             .size = sizeof(spi_backing_buffer),
         },
+    };
+
+    struct buffer deferred_transaction_data =
+    {
+        .buffer = dcp_double_buffer[1],
+        .size = sizeof(dcp_double_buffer[1]),
+    };
+
+    struct collision_check_data ccdata =
+    {
+        .gpio = gpio,
+        .current_transaction = &transaction,
     };
 
     reset_transaction_struct(&transaction);
@@ -721,16 +792,19 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
     while(keep_running)
     {
         if(gpio != NULL)
-            process_request_line(&transaction, fifo_in_fd, fifo_out_fd,
-                                 spi_fd, spi_timeout_ms, gpio, &prev_gpio_state);
+            process_request_line(&transaction, &deferred_transaction_data,
+                                 fifo_in_fd, fifo_out_fd,
+                                 spi_fd, spi_timeout_ms, &ccdata, &prev_gpio_state);
 
         if(expecting_dcp_data(&transaction))
-            wait_for_dcp_data(&transaction, fifo_in_fd, fifo_out_fd,
+            wait_for_dcp_data(&transaction, &deferred_transaction_data,
+                              fifo_in_fd, fifo_out_fd,
                               spi_fd, spi_timeout_ms,
-                              gpio_fd, gpio, &prev_gpio_state);
+                              gpio_fd, &ccdata, &prev_gpio_state);
         else
-            process_transaction(&transaction, fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms);
+            process_transaction(&transaction, &deferred_transaction_data,
+                                fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, &ccdata);
     }
 }
 

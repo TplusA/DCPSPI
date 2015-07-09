@@ -20,6 +20,7 @@
 #define SPI_H
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <unistd.h>
 
 #ifdef __cplusplus
@@ -49,9 +50,35 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
 
 /*!
  * Send buffer as is over SPI.
+ *
+ * \param fd
+ *     File descriptor of SPI device.
+ *
+ * \param buffer, length
+ *     Buffer to send and its size.
+ *
+ * \param timeout_ms
+ *     The maximum amount of time to wait for the slave to get ready in
+ *     milliseconds.
+ *
+ * \param is_slave_interrupting
+ *     After each check for slave ready state, this function is called to check
+ *     if the slave has asserted the request line. If it has, then there is a
+ *     collision and sending the buffer is aborted. We are doing this through a
+ *     callback function for decoupling SPI from GPIO and possibly more state
+ *     checks to come.
+ *
+ * \param user_data
+ *     Pointer to opaque data passed to \p is_slave_interrupting().
+ *
+ * \retval 0  On success.
+ * \retval 1  On collision (slave requested start of a transaction).
+ * \retval -1 On hard error or timeout.
  */
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                    unsigned int timeout_ms);
+                    unsigned int timeout_ms,
+                    bool (*is_slave_interrupting)(void *data),
+                    void *user_data);
 
 /*!
  * Fill buffer from SPI, but remove 0xff NOP bytes.

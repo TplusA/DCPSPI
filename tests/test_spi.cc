@@ -471,6 +471,11 @@ static void expect_spi_slave_gets_ready(void)
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 }
 
+static bool slave_does_not_interrupt(void *data)
+{
+    return false;
+}
+
 /*!\test
  * Regular happy case: just write some data to SPI slave, no escape character.
  */
@@ -491,7 +496,8 @@ void test_write_to_spi(void)
     cppcut_assert_equal(0,
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
-                                        expected_content.size(), 500));
+                                        expected_content.size(), 500,
+                                        slave_does_not_interrupt, NULL));
 }
 
 /*!\test
@@ -517,7 +523,8 @@ void test_write_escaped_data_to_spi(void)
 
     cppcut_assert_equal(0,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
-                                        raw_data.size(), 500));
+                                        raw_data.size(), 500,
+                                        slave_does_not_interrupt, NULL));
 }
 
 /*!\test
@@ -934,7 +941,8 @@ void test_send_timeout_without_any_write_is_not_possible(void)
 
     cppcut_assert_equal(-1,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000));
+                                        buffer.data(), buffer.size(), 1000,
+                                        slave_does_not_interrupt, NULL));
 }
 
 /*!\test
@@ -980,7 +988,8 @@ void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
 
     cppcut_assert_equal(0,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 100));
+                                        buffer.data(), buffer.size(), 100,
+                                        slave_does_not_interrupt, NULL));
 }
 
 /*!\test
@@ -1029,7 +1038,40 @@ void test_send_to_slave_may_fail_due_to_timeout(void)
     cppcut_assert_equal(-1,
                         spi_send_buffer(expected_spi_fd,
                                         not_sent_data.data(),
-                                        not_sent_data.size(), 100));
+                                        not_sent_data.size(), 100,
+                                        slave_does_not_interrupt, NULL));
+}
+
+/*!\test
+ * Collisions are detected when the slave device asserts the request line
+ * during waiting for slave ready signal.
+ *
+ * The test only checks if detection is done the right way, provided that the
+ * request line is correctly evaluated in the callback passed to
+ * #spi_send_buffer(). Collision handling is done in the layer on top and
+ * should be tested somewhere else.
+ */
+void test_collision_detection(void)
+{
+    struct timespec t =
+    {
+        .tv_sec = 10,
+        .tv_nsec = 0,
+    };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "Collision detected");
+
+    std::array<uint8_t, 10> buffer;
+    buffer.fill(0x55);
+
+    cppcut_assert_equal(1,
+                        spi_send_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 1000,
+                                        [] (void *data) { return true; },
+                                        NULL));
 }
 
 };

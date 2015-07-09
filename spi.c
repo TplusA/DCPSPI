@@ -86,7 +86,9 @@ static bool timeout_expired(const struct timespec *restrict timeout,
     return current->tv_nsec >= timeout->tv_nsec;
 }
 
-static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
+static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
+                              bool (*is_slave_interrupting)(void *data),
+                              void *user_data)
 {
     uint8_t buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
 
@@ -115,6 +117,14 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
             msg_error(errno, LOG_EMERG,
                       "Failed waiting for slave device on fd %d", fd);
             return -1;
+        }
+
+        if(is_slave_interrupting(user_data))
+        {
+            /* collision: while we were preparing to send something to the slave,
+             * it asserted the request line in order to send something to us */
+            msg_error(0, LOG_NOTICE, "Collision detected");
+            return 1;
         }
 
         for(size_t i = 0; i < sizeof(buffer); ++i)
@@ -149,7 +159,9 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms)
 }
 
 int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                    unsigned int timeout_ms)
+                    unsigned int timeout_ms,
+                    bool (*is_slave_interrupting)(void *data),
+                    void *user_data)
 {
     if(fd < 0)
     {
@@ -157,8 +169,10 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         return 0;
     }
 
-    if(wait_for_spi_slave(fd, timeout_ms) < 0)
-        return -1;
+    int ret = wait_for_spi_slave(fd, timeout_ms,
+                                 is_slave_interrupting, user_data);
+    if(ret != 0)
+        return ret;
 
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -170,9 +184,8 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         },
     };
 
-    int ret =
-        spi_hw_do_transfer(fd, spi_transfer,
-                           sizeof(spi_transfer) / sizeof(spi_transfer[0]));
+    ret = spi_hw_do_transfer(fd, spi_transfer,
+                             sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {
