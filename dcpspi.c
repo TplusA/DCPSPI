@@ -371,10 +371,7 @@ static bool check_slave_request_collision(void *data)
 {
     const struct collision_check_data *const check_data = data;
 
-    if(check_data->current_transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
-        return gpio_is_active(check_data->gpio);
-    else
-        return false;
+    return gpio_is_active(check_data->gpio);
 }
 
 static void process_transaction(struct dcp_transaction *transaction,
@@ -486,17 +483,29 @@ static void process_transaction(struct dcp_transaction *transaction,
         }
         else if(ret == 1)
         {
-            /* collision; process slave request first, schedule transaction
-             * again at some later point */
-            if(transaction->state != TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
-                BUG("Unexpected transaction state");
+            if(transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
+            {
+                /* collision; process slave request first, reschedule master
+                 * transaction when the slave request is done */
+                if(deferred_transaction_data->pos > 0)
+                    BUG("Lost deferred transaction");
 
-            if(deferred_transaction_data->pos > 0)
-                BUG("Lost deferred transaction");
+                swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
+                transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
 
-            swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
-            transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
-            break;
+                break;
+            }
+            else
+            {
+                /* slave didn't wait long enough for our answer (or we were
+                 * just very slow due to an unlucky schedule in an overloaded
+                 * system); in this state, we already got the complete answer
+                 * to the ongoing transaction from DCPD, and we can throw it
+                 * away because the slave is not interested anymore */
+                msg_info("%s: slave interrupted active transaction with new "
+                         "request, dropping answer to previous request",
+                         tr_log_prefix(transaction->state));;
+            }
         }
 
         msg_info("%s: DONE", tr_log_prefix(transaction->state));
