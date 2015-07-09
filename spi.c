@@ -388,6 +388,8 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
             if(reset_timeout)
             {
+                /* got something, do not consider timeout anymore for fast
+                 * failure when necessary */
                 expiration_time = current_time;
                 reset_timeout = false;
             }
