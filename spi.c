@@ -129,8 +129,8 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
         for(size_t i = 0; i < sizeof(buffer); ++i)
         {
-            /* slave sent some non-NOP byte, so it's ready to accept data */
-            if(buffer[i] != UINT8_MAX)
+            /* slave sent zero byte, so it's ready to accept data */
+            if(buffer[i] == 0)
                 return 0;
         }
 

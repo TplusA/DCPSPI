@@ -90,6 +90,7 @@ class spi_rw_data_t
     {
         EXPECT_READ_NOPS,
         EXPECT_READ_ZEROS,
+        EXPECT_READ_NON_ZERO,
     };
 
     spi_rw_data_t(const spi_rw_data_t &) = delete;
@@ -136,6 +137,10 @@ class spi_rw_data_t
 
           case EXPECT_READ_ZEROS:
             data.fill(0);
+            break;
+
+          case EXPECT_READ_NON_ZERO:
+            data.fill(0xa5);
             break;
         }
     }
@@ -949,7 +954,7 @@ void test_send_timeout_without_any_write_is_not_possible(void)
  * Before sending data, wait for slave until it gets ready, timeout does not
  * expire.
  */
-void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
+void test_send_to_slave_waits_for_zero_byte_answer_before_sending(void)
 {
     struct timespec t =
     {
@@ -968,8 +973,11 @@ void test_send_to_slave_waits_for_non_nop_answer_before_sending(void)
         mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
         t.tv_nsec += 5UL * 1000UL * 1000UL;
 
+        const auto slave_writes = ((i % 2) == 0
+                                   ? spi_rw_data_t::EXPECT_READ_NOPS
+                                   : spi_rw_data_t::EXPECT_READ_NON_ZERO);
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
-                                                           spi_rw_data_t::EXPECT_READ_NOPS,
+                                                           slave_writes,
                                                            true);
         mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     }
