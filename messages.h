@@ -53,6 +53,8 @@ void msg_info(const char *format_string, ...)
 }
 #endif
 
+#define BUG(...) msg_error(0, LOG_CRIT, "BUG: " __VA_ARGS__)
+
 #ifdef NDEBUG
 #define log_assert(EXPR) do {} while(0)
 #else /* !NDEBUG */
