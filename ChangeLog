@@ -1,3 +1,11 @@
+2015-07-13  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.2 released.
+
+	* Show version information in log, add --version option.
+
+	* Fix SPI collision and repeated requests handling.
+
 2015-06-30  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.1 released.
