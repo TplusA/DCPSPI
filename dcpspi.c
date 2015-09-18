@@ -533,6 +533,18 @@ static void process_transaction(struct dcp_transaction *transaction,
         transaction->pending_size_of_transaction =
             get_dcp_data_size(transaction->dcp_buffer.buffer);
 
+        if(transaction->pending_size_of_transaction >
+           (transaction->dcp_buffer.size - DCP_HEADER_SIZE))
+        {
+            msg_error(EINVAL, LOG_ERR,
+                      "%s: transaction size %u exceeds maximum size of %zu",
+                      tr_log_prefix(transaction->state),
+                      transaction->pending_size_of_transaction,
+                      transaction->dcp_buffer.size - DCP_HEADER_SIZE);
+            reset_transaction(transaction);
+            break;
+        }
+
         if(transaction->pending_size_of_transaction > 0)
         {
             transaction->state = TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE;
