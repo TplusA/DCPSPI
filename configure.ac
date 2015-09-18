@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([DCPSPI], [1.2], [r.tiemann@ta-hifi.com])
+AC_INIT([DCPSPI], [1.3], [r.tiemann@ta-hifi.com])
 AC_CONFIG_AUX_DIR([config])
 AM_INIT_AUTOMAKE([1.11 -Wall -Werror foreign])
 AM_SILENT_RULES([yes])

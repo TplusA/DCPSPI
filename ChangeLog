@@ -1,3 +1,10 @@
+2015-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.3 released.
+
+	* Slave transactions: Better input sanitation, do not accept
+	  transaction sizes bigger than 256.
+
 2015-07-13  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.2 released.
