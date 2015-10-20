@@ -32,7 +32,7 @@
 /*!
  * SPI speed in Hz for all transfers.
  */
-static uint32_t spi_speed_hz = 128000U;
+static uint32_t spi_speed_hz = 1000U * 1000U;
 
 /*!
  * Kernel spidev driver defaults to writing hard-coded 0's in case we
