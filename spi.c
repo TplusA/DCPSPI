@@ -149,7 +149,7 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
         /* give the slave (and ourselves) a break */
         static const struct timespec delay_between_slave_ready_probes =
         {
-            .tv_nsec = 30L * 1000L * 1000L,
+            .tv_nsec = 5L * 1000L * 1000L,
         };
 
         os_nanosleep(&delay_between_slave_ready_probes);

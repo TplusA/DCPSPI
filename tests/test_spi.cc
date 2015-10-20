@@ -41,7 +41,7 @@ namespace spi_communication_tests
 static constexpr int expected_spi_fd = 42;
 static constexpr size_t wait_for_slave_spi_transfer_size = 2;
 static constexpr size_t read_from_slave_spi_transfer_size = 32;
-static constexpr unsigned long delay_between_slave_probes_ms = 30;
+static constexpr unsigned long delay_between_slave_probes_ms = 5;
 
 class spi_rw_data_partial_t
 {
@@ -964,14 +964,14 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending(void)
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
 
-    /* some NOP transfers while waiting for slave, one short transfer per 5 ms
+    /* some NOP transfers while waiting for slave, one short transfer per 2 ms
      * (that is, we do NOT take the real amount of delay into account here,
      * which would be #delay_between_slave_probes_ms!) */
-    for(int i = 0; i < 5; ++i)
+    for(int i = 0; i < 10; ++i)
     {
         mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
         mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
-        t.tv_nsec += 5UL * 1000UL * 1000UL;
+        t.tv_nsec += 2UL * 1000UL * 1000UL;
 
         const auto slave_writes = ((i % 2) == 0
                                    ? spi_rw_data_t::EXPECT_READ_NOPS
