@@ -802,7 +802,7 @@ void test_long_timeout(void)
         .tv_nsec = 0,
     };
 
-    /* 2.999999999 seconds seconds later than t1 */
+    /* 2.999999999 seconds later than t1 */
     static const struct timespec t3 =
     {
         .tv_sec = 3,
