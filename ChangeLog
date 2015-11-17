@@ -1,3 +1,13 @@
+2015-11-17  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.4 released.
+
+	* SPI interface: Increased clock frequency from 128 kHz to 1 MHz,
+	  resulting in a speed-up of transfers by a factor of more than 7.8.
+
+	* SPI transactions: Slave poll interval reduced from 30 ms to 5 ms,
+	  resulting in vastly improved latencies.
+
 2015-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.3 released.
