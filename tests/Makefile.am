@@ -9,7 +9,7 @@ AM_TESTS_ENVIRONMENT = CUTTER="$(CUTTER)" XSLTPROC="$(XSLTPROC)" VALGRIND="$(VAL
 
 AM_LDFLAGS = -module -rpath $(libdir) -avoid-version -no-undefined
 
-AM_CPPFLAGS = $(CUTTER_CFLAGS)
+AM_CPPFLAGS = $(CPPCUTTER_CFLAGS)
 AM_CPPFLAGS += -I$(top_srcdir)
 
 AM_CFLAGS = $(CWARNINGS)
