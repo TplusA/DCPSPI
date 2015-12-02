@@ -481,6 +481,11 @@ static bool slave_does_not_interrupt(void *data)
     return false;
 }
 
+static bool slave_is_interrupting(void *data)
+{
+    return true;
+}
+
 /*!\test
  * Regular happy case: just write some data to SPI slave, no escape character.
  */
@@ -1078,8 +1083,7 @@ void test_collision_detection()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000,
-                                        [] (void *data) { return true; },
-                                        NULL));
+                                        slave_is_interrupting, NULL));
 }
 
 };
