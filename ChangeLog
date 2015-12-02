@@ -1,3 +1,30 @@
+2015-12-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.5 released.
+
+	* Protocol: Fix race condition in collision detection.
+
+	  The protocol was slightly extended such that the SPI slave is now
+	  expected to send a zero byte when it is ready to receive data from
+	  the master, and a NOP when it's not. Anything else is considered
+	  protocol data, indicating a collision, and is fed into the SPI input
+	  buffer.
+
+	  Collisions like these are bound to happen sometimes because it is
+	  simply impossible for the slave to tell that a master transaction is
+	  about to begin. For the master it is equally impossible to check the
+	  request line and start a master SPI transaction at exactly the same
+	  time, so for a small time window there is a chance for a collision
+	  to happen.
+
+	* Protocol: Request GPIO is checked before starting to poll the slave
+	  device. This reduces the amount of unnecessary polling during a
+	  collision.
+
+	* Testing: Add command line option to enable dummy mode for testing on
+	  PCs (no SPI nor GPIO accesses are being made in this mode). Pass a
+	  dash to the --spidev option to enable dummy mode.
+
 2015-11-17  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.4 released.
