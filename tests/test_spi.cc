@@ -869,11 +869,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
         }
     };
 
-    static const struct timespec t =
-    {
-        .tv_sec = 0,
-        .tv_nsec = 0,
-    };
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
     for(size_t i = 0;
         i < sizeof(slave_request_data) / sizeof(slave_request_data[0]);
@@ -1066,11 +1062,7 @@ void test_send_to_slave_may_fail_due_to_timeout()
  */
 void test_collision_detection()
 {
-    struct timespec t =
-    {
-        .tv_sec = 10,
-        .tv_nsec = 0,
-    };
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
