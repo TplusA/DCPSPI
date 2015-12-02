@@ -838,6 +838,7 @@ struct parameters
     unsigned int gpio_num;
     bool run_in_foreground;
     bool gpio_needs_debouncing;
+    bool dummy_mode;
 };
 
 /*!
@@ -845,8 +846,7 @@ struct parameters
  */
 static int setup(const struct parameters *parameters,
                  int *fifo_in_fd, int *fifo_out_fd,
-                 int *spi_fd, struct gpio_handle **gpio,
-                 bool dummy_mode)
+                 int *spi_fd, struct gpio_handle **gpio)
 {
     msg_enable_syslog(!parameters->run_in_foreground);
 
@@ -872,7 +872,7 @@ static int setup(const struct parameters *parameters,
     if(*fifo_out_fd < 0)
         goto error_fifo_out;
 
-    if(dummy_mode)
+    if(parameters->dummy_mode)
     {
         *spi_fd = -1;
         *gpio = NULL;
@@ -932,6 +932,7 @@ static int process_command_line(int argc, char *argv[],
     parameters->gpio_num = 4;
     parameters->run_in_foreground = false;
     parameters->gpio_needs_debouncing = false;
+    parameters->dummy_mode = false;
 
 #define CHECK_ARGUMENT() \
     do \
@@ -1009,6 +1010,9 @@ static int process_command_line(int argc, char *argv[],
 
 #undef CHECK_ARGUMENT
 
+    if(parameters->spidev_name[0] == '-' && parameters->spidev_name[1] == '\0')
+        parameters->dummy_mode = true;
+
     return 0;
 }
 
@@ -1036,12 +1040,10 @@ int main(int argc, char *argv[])
         return EXIT_SUCCESS;
     }
 
-    static const bool dummy_mode = false;
-
     int fifo_in_fd, fifo_out_fd, spi_fd;
     struct gpio_handle *gpio;
 
-    if(setup(&parameters, &fifo_in_fd, &fifo_out_fd, &spi_fd, &gpio, dummy_mode) < 0)
+    if(setup(&parameters, &fifo_in_fd, &fifo_out_fd, &spi_fd, &gpio) < 0)
         return EXIT_FAILURE;
 
     static struct sigaction action =
@@ -1058,13 +1060,13 @@ int main(int argc, char *argv[])
 
     msg_info("Terminated, shutting down");
 
-    if(!dummy_mode)
+    if(!parameters.dummy_mode)
         spi_close_device(spi_fd);
 
     fifo_close_and_delete(&fifo_in_fd, parameters.fifo_in_name);
     fifo_close_and_delete(&fifo_out_fd, parameters.fifo_out_name);
 
-    if(!dummy_mode)
+    if(!parameters.dummy_mode)
         gpio_close(gpio);
 
     return EXIT_SUCCESS;
