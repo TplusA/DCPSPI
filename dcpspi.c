@@ -490,7 +490,6 @@ static void process_transaction(struct dcp_transaction *transaction,
             break;
 
           case SPI_SEND_RESULT_COLLISION:
-            /* FIXME: Collisions need to be handled differently. */
             if(transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
             {
                 /* collision; process slave request first, reschedule master
