@@ -95,20 +95,22 @@ static bool timeout_expired(const struct timespec *restrict timeout,
 
 static enum SpiSendResult
 wait_for_spi_slave(int fd, unsigned int timeout_ms,
-                   bool (*is_slave_interrupting)(void *data), void *user_data)
+                   uint8_t *const buffer, const size_t buffer_size,
+                   bool (*is_slave_interrupting)(void *data), void *user_data,
+                   size_t *significant_data_offset)
 {
-    uint8_t buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
-
     const struct spi_ioc_transfer spi_transfer[] =
     {
         {
             .tx_buf = (unsigned long)spi_dummy_bytes,
             .rx_buf = (unsigned long)buffer,
-            .len = sizeof(buffer),
+            .len = buffer_size,
             .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
         },
     };
+
+    *significant_data_offset = buffer_size;
 
     struct timespec expiration_time;
     compute_expiration_time(&expiration_time, timeout_ms);
@@ -134,13 +136,14 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
             return SPI_SEND_RESULT_FAILURE;
         }
 
-        for(size_t i = 0; i < sizeof(buffer); ++i)
+        for(size_t i = 0; i < buffer_size; ++i)
         {
             if(buffer[i] == 0)
                 return SPI_SEND_RESULT_OK;
             else if(buffer[i] != UINT8_MAX)
             {
                 msg_error(0, LOG_NOTICE, "Collision detected (got funny poll bytes)");
+                *significant_data_offset = i;
                 return SPI_SEND_RESULT_COLLISION;
             }
         }
@@ -167,6 +170,8 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
     }
 }
 
+static struct spi_input_buffer global_spi_input_buffer;
+
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
                                    unsigned int timeout_ms,
                                    bool (*is_slave_interrupting)(void *data),
@@ -178,11 +183,32 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         return SPI_SEND_RESULT_OK;
     }
 
+    uint8_t poll_bytes_buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
+    size_t significant_data_offset;
     const enum SpiSendResult wait_result =
-        wait_for_spi_slave(fd, timeout_ms, is_slave_interrupting, user_data);
+        wait_for_spi_slave(fd, timeout_ms,
+                           poll_bytes_buffer, sizeof(poll_bytes_buffer),
+                           is_slave_interrupting, user_data,
+                           &significant_data_offset);
 
     if(wait_result != SPI_SEND_RESULT_OK)
+    {
+        if(wait_result == SPI_SEND_RESULT_COLLISION &&
+           significant_data_offset < sizeof(poll_bytes_buffer))
+        {
+            if(global_spi_input_buffer.buffer_pos > 0)
+                BUG("Discarding %zu bytes from SPI receive buffer after collision",
+                    global_spi_input_buffer.buffer_pos);
+
+            global_spi_input_buffer.buffer_pos =
+                sizeof(poll_bytes_buffer) - significant_data_offset;
+            memcpy(global_spi_input_buffer.buffer,
+                   poll_bytes_buffer + significant_data_offset,
+                   global_spi_input_buffer.buffer_pos);
+        }
+
         return wait_result;
+    }
 
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -346,8 +372,6 @@ static size_t consume_from_buffer(struct spi_input_buffer *const restrict src,
 
     return consumed;
 }
-
-static struct spi_input_buffer global_spi_input_buffer;
 
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms)

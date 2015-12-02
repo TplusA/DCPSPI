@@ -1059,6 +1059,8 @@ void test_send_to_slave_may_fail_due_to_timeout()
  */
 void test_collision_detection_by_gpio()
 {
+    /* no polling takes place because the request line is asserted when the
+     * send attempt is being made */
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -1072,6 +1074,26 @@ void test_collision_detection_by_gpio()
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000,
                                         slave_is_interrupting, NULL));
+
+    /* the slave's data can be received */
+    std::array<uint8_t, 15> expected_data;
+    for(size_t i = 0; i < expected_data.size(); ++i)
+        expected_data[i] = i + DCP_ESCAPE_CHARACTER + 1;
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, expected_data);
+    expect_spi_transfers(expected_data.size());
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    std::array<uint8_t, expected_data.size()> receive_buffer;
+
+    cppcut_assert_equal(ssize_t(receive_buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        receive_buffer.data(),
+                                        receive_buffer.size(), 500));
+
+    cut_assert_equal_memory(expected_data.data(), expected_data.size(),
+                            receive_buffer.data(), receive_buffer.size());
 }
 
 /*!\test
@@ -1083,6 +1105,8 @@ void test_collision_detection_by_gpio()
  */
 void test_collision_detection_by_inspecting_poll_bytes()
 {
+    /* polling takes place because the request list is not asserted (not yet or
+     * not anymore---we will never know) */
     spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
                                                        spi_rw_data_t::EXPECT_READ_NON_ZERO,
                                                        true);
@@ -1094,13 +1118,79 @@ void test_collision_detection_by_inspecting_poll_bytes()
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
 
-    std::array<uint8_t, 10> buffer;
-    buffer.fill(0x55);
+    std::array<uint8_t, 10> send_buffer;
+    send_buffer.fill(0x55);
 
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000,
-                                        slave_does_not_interrupt, NULL));
+                                        send_buffer.data(), send_buffer.size(),
+                                        1000, slave_does_not_interrupt, NULL));
+
+    /* the slave's data sent while polling can be received */
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    std::array<uint8_t, 2> receive_buffer;
+
+    cppcut_assert_equal(ssize_t(receive_buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        receive_buffer.data(),
+                                        receive_buffer.size(), 500));
+
+    cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[0]));
+    cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[1]));
+}
+
+/*!\test
+ * Bytes read from slave while polling are not discarded after detecting a
+ * collision in poll bytes (see #161).
+ */
+void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
+{
+    /* slave sends these bytes when being polled */
+    static const std::array<uint8_t, 2> first_fragment  = { 0x01, 0x00, };
+
+    spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                       first_fragment,
+                                                       true);
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "Collision detected (got funny poll bytes)");
+
+    std::array<uint8_t, 10> send_buffer;
+    send_buffer.fill(0x55);
+
+    cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
+                        spi_send_buffer(expected_spi_fd,
+                                        send_buffer.data(), send_buffer.size(),
+                                        1000, slave_does_not_interrupt, NULL));
+
+    /* slave sends more data to complete its command */
+    static const std::array<uint8_t, 5> second_fragment = { 0x66, 0x77, 0x88, 0xaa, 0xfe, };
+
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, second_fragment);
+
+    std::array<uint8_t, first_fragment.size() + second_fragment.size()> expected_data;
+
+    std::copy(first_fragment.begin(), first_fragment.end(),
+              expected_data.begin() + 0);
+    std::copy(second_fragment.begin(), second_fragment.end(),
+              expected_data.begin() + first_fragment.size());
+
+    std::array<uint8_t, expected_data.size()> receive_buffer;
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cppcut_assert_equal(ssize_t(receive_buffer.size()),
+                        spi_read_buffer(expected_spi_fd,
+                                        receive_buffer.data(),
+                                        receive_buffer.size(), 500));
+
+    cut_assert_equal_memory(expected_data.data(), expected_data.size(),
+                            receive_buffer.data(), receive_buffer.size());
 }
 
 };
