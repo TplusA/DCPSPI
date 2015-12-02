@@ -470,19 +470,27 @@ static void process_transaction(struct dcp_transaction *transaction,
         msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
                  tr_log_prefix(transaction->state),
                  transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
-        int ret =
+
+        const enum SpiSendResult ret =
             spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
                             transaction->spi_buffer.pos, spi_timeout_ms,
                             check_slave_request_collision, ccdata);
+        bool leave_switch = false;
 
-        if(ret < 0)
+        switch(ret)
         {
-            /* hard failure; abort transaction */
-            reset_transaction(transaction);
+          case SPI_SEND_RESULT_OK:
             break;
-        }
-        else if(ret == 1)
-        {
+
+          case SPI_SEND_RESULT_TIMEOUT:
+          case SPI_SEND_RESULT_FAILURE:
+            /* hard failure or timeout; abort transaction */
+            reset_transaction(transaction);
+            leave_switch = true;
+            break;
+
+          case SPI_SEND_RESULT_COLLISION:
+            /* FIXME: Collisions need to be handled differently. */
             if(transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
             {
                 /* collision; process slave request first, reschedule master
@@ -492,8 +500,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
                 swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
                 transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
-
-                break;
+                leave_switch = true;
             }
             else
             {
@@ -506,7 +513,12 @@ static void process_transaction(struct dcp_transaction *transaction,
                          "request, dropping answer to previous request",
                          tr_log_prefix(transaction->state));;
             }
+
+            break;
         }
+
+        if(leave_switch)
+            break;
 
         msg_info("%s: DONE", tr_log_prefix(transaction->state));
         reset_transaction(transaction);

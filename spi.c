@@ -86,9 +86,9 @@ static bool timeout_expired(const struct timespec *restrict timeout,
     return current->tv_nsec >= timeout->tv_nsec;
 }
 
-static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
-                              bool (*is_slave_interrupting)(void *data),
-                              void *user_data)
+static enum SpiSendResult
+wait_for_spi_slave(int fd, unsigned int timeout_ms,
+                   bool (*is_slave_interrupting)(void *data), void *user_data)
 {
     uint8_t buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
 
@@ -116,7 +116,7 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
         {
             msg_error(errno, LOG_EMERG,
                       "Failed waiting for slave device on fd %d", fd);
-            return -1;
+            return SPI_SEND_RESULT_FAILURE;
         }
 
         if(is_slave_interrupting(user_data))
@@ -124,14 +124,14 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
             /* collision: while we were preparing to send something to the slave,
              * it asserted the request line in order to send something to us */
             msg_error(0, LOG_NOTICE, "Collision detected");
-            return 1;
+            return SPI_SEND_RESULT_COLLISION;
         }
 
         for(size_t i = 0; i < sizeof(buffer); ++i)
         {
             /* slave sent zero byte, so it's ready to accept data */
             if(buffer[i] == 0)
-                return 0;
+                return SPI_SEND_RESULT_OK;
         }
 
         /* only NOPs, try again if we are within the specified timeout... */
@@ -143,7 +143,7 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
             msg_error(0, LOG_NOTICE,
                       "SPI write timeout, slave didn't get ready within %u ms",
                       timeout_ms);
-            break;
+            return SPI_SEND_RESULT_TIMEOUT;
         }
 
         /* give the slave (and ourselves) a break */
@@ -154,25 +154,24 @@ static int wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
         os_nanosleep(&delay_between_slave_ready_probes);
     }
-
-    return -1;
 }
 
-int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                    unsigned int timeout_ms,
-                    bool (*is_slave_interrupting)(void *data),
-                    void *user_data)
+enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
+                                   unsigned int timeout_ms,
+                                   bool (*is_slave_interrupting)(void *data),
+                                   void *user_data)
 {
     if(fd < 0)
     {
         /* operating in dummy mode */
-        return 0;
+        return SPI_SEND_RESULT_OK;
     }
 
-    int ret = wait_for_spi_slave(fd, timeout_ms,
-                                 is_slave_interrupting, user_data);
-    if(ret != 0)
-        return ret;
+    const enum SpiSendResult wait_result =
+        wait_for_spi_slave(fd, timeout_ms, is_slave_interrupting, user_data);
+
+    if(wait_result != SPI_SEND_RESULT_OK)
+        return wait_result;
 
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -184,17 +183,18 @@ int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         },
     };
 
-    ret = spi_hw_do_transfer(fd, spi_transfer,
-                             sizeof(spi_transfer) / sizeof(spi_transfer[0]));
+    const int ret =
+        spi_hw_do_transfer(fd, spi_transfer,
+                           sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {
         msg_error(errno, LOG_EMERG,
                   "Failed writing %zu bytes to SPI device fd %d", length, fd);
-        return -1;
+        return SPI_SEND_RESULT_FAILURE;
     }
     else
-        return 0;
+        return SPI_SEND_RESULT_OK;
 }
 
 size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,

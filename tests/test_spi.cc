@@ -498,7 +498,7 @@ void test_write_to_spi()
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
 
-    cppcut_assert_equal(0,
+    cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
                                         expected_content.size(), 500,
@@ -526,7 +526,7 @@ void test_write_escaped_data_to_spi()
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
 
-    cppcut_assert_equal(0,
+    cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
                                         raw_data.size(), 500,
                                         slave_does_not_interrupt, NULL));
@@ -944,7 +944,7 @@ void test_send_timeout_without_any_write_is_not_possible()
     std::array<uint8_t, 10> buffer;
     buffer.fill(0x55);
 
-    cppcut_assert_equal(-1,
+    cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000,
                                         slave_does_not_interrupt, NULL));
@@ -994,7 +994,7 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
     spi_rw_data->set(buffer);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
-    cppcut_assert_equal(0,
+    cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 100,
                                         slave_does_not_interrupt, NULL));
@@ -1043,7 +1043,7 @@ void test_send_to_slave_may_fail_due_to_timeout()
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI write timeout, slave didn't get ready within 100 ms");
 
-    cppcut_assert_equal(-1,
+    cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
                                         not_sent_data.data(),
                                         not_sent_data.size(), 100,
@@ -1075,7 +1075,7 @@ void test_collision_detection()
     std::array<uint8_t, 10> buffer;
     buffer.fill(0x55);
 
-    cppcut_assert_equal(1,
+    cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000,
                                         [] (void *data) { return true; },

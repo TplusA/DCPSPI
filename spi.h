@@ -23,6 +23,14 @@
 #include <stdbool.h>
 #include <unistd.h>
 
+enum SpiSendResult
+{
+    SPI_SEND_RESULT_OK,
+    SPI_SEND_RESULT_FAILURE,
+    SPI_SEND_RESULT_TIMEOUT,
+    SPI_SEND_RESULT_COLLISION,
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -71,14 +79,16 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  * \param user_data
  *     Pointer to opaque data passed to \p is_slave_interrupting().
  *
- * \retval 0  On success.
- * \retval 1  On collision (slave requested start of a transaction).
- * \retval -1 On hard error or timeout.
+ * \retval #SPI_SEND_RESULT_OK         On success.
+ * \retval #SPI_SEND_RESULT_FAILURE    On unrecoverable, hard error.
+ * \retval #SPI_SEND_RESULT_TIMEOUT    On timeout.
+ * \retval #SPI_SEND_RESULT_COLLISION  On collision (slave requested start of a
+ *                                     transaction).
  */
-int spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                    unsigned int timeout_ms,
-                    bool (*is_slave_interrupting)(void *data),
-                    void *user_data);
+enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
+                                   unsigned int timeout_ms,
+                                   bool (*is_slave_interrupting)(void *data),
+                                   void *user_data);
 
 /*!
  * Fill buffer from SPI, but remove 0xff NOP bytes.
