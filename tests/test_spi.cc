@@ -356,6 +356,45 @@ static size_t expect_spi_transfers(size_t number_of_bytes)
     return count;
 }
 
+static int return_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
+                       size_t number_of_fragments)
+{
+    for(size_t f = 0; f < number_of_fragments; ++f)
+    {
+        void *dest_buffer = reinterpret_cast<void *>(spi_transfer[f].rx_buf);
+
+        if(dest_buffer != nullptr)
+            memset(dest_buffer, UINT8_MAX, spi_transfer[f].len);
+    }
+
+    return 0;
+}
+
+static void ensure_empty_read_buffer()
+{
+    static const struct timespec t1 = { .tv_sec = 1000, .tv_nsec = 0, };
+    static const struct timespec t2 = { .tv_sec = 1000, .tv_nsec = 1, };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+    mock_messages->expect_msg_error(0, LOG_NOTICE,
+                                    "SPI read timeout, returning %zu of %zu bytes");
+
+    uint8_t should_remain_untouched[1024] = { 0 };
+
+    const ssize_t bytes =
+        spi_read_buffer(expected_spi_fd, should_remain_untouched,
+                        sizeof(should_remain_untouched), 0);
+
+    if(bytes > 0)
+    {
+        /* produce a useful failure message */
+        cut_assert_equal_memory(should_remain_untouched, 0,
+                                should_remain_untouched, bytes);
+    }
+}
+
 /*!\test
  * Regular happy case: just read some data from SPI slave, no escape character.
  */
@@ -380,6 +419,8 @@ void test_read_from_spi()
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
                             buffer.data(), buffer.size());
+
+    ensure_empty_read_buffer();
 }
 
 /*!\test
@@ -429,6 +470,8 @@ void test_read_escaped_data_from_spi()
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
                             buffer.data(), buffer.size());
+
+    ensure_empty_read_buffer();
 }
 
 /*!\test
@@ -462,6 +505,8 @@ void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escap
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
                             buffer.data(), buffer.size());
+
+    ensure_empty_read_buffer();
 }
 
 static void expect_spi_slave_gets_ready()
@@ -641,20 +686,6 @@ void test_too_small_buffer_for_escaped_data_with_last_char_is_uint8_max()
     cppcut_assert_equal(uint8_t(DCP_ESCAPE_CHARACTER), dest_buffer[5]);
     cppcut_assert_equal(uint8_t(0x55), dest_buffer[6]);
     cppcut_assert_equal(uint8_t(0x55), dest_buffer[7]);
-}
-
-static int return_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
-                       size_t number_of_fragments)
-{
-    for(size_t f = 0; f < number_of_fragments; ++f)
-    {
-        void *dest_buffer = reinterpret_cast<void *>(spi_transfer[f].rx_buf);
-
-        if(dest_buffer != nullptr)
-            memset(dest_buffer, UINT8_MAX, spi_transfer[f].len);
-    }
-
-    return 0;
 }
 
 template <size_t N>
@@ -916,6 +947,11 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
                                 drcp_command_buffer.data(),
                                 drcp_command_buffer.size());
     }
+
+    mock_messages->expect_msg_info_formatted("Discarding 27 bytes from SPI receive buffer");
+    spi_new_transaction();
+
+    ensure_empty_read_buffer();
 }
 
 /*!\test
@@ -1094,6 +1130,8 @@ void test_collision_detection_by_gpio()
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
+
+    ensure_empty_read_buffer();
 }
 
 /*!\test
@@ -1138,6 +1176,8 @@ void test_collision_detection_by_inspecting_poll_bytes()
 
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[0]));
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[1]));
+
+    ensure_empty_read_buffer();
 }
 
 /*!\test
@@ -1191,6 +1231,8 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
+
+    ensure_empty_read_buffer();
 }
 
 };
