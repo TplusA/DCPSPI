@@ -46,6 +46,13 @@ static const uint8_t spi_dummy_bytes[32] =
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
 
+struct spi_input_buffer
+{
+    uint8_t buffer[sizeof(spi_dummy_bytes)];
+    size_t buffer_pos;
+    bool pending_escape_sequence;
+};
+
 int spi_open_device(const char *devname)
 {
     return spi_hw_open_device(devname);
@@ -288,14 +295,13 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
  *
  * The buffer size must be at least as big as the #spi_dummy_bytes array.
  */
-static ssize_t read_chunk(int fd, uint8_t *buffer,
-                          bool *const pending_escape_sequence)
+static ssize_t read_chunk(int fd, struct spi_input_buffer *const in)
 {
     const struct spi_ioc_transfer spi_transfer[] =
     {
         {
             .tx_buf = (unsigned long)spi_dummy_bytes,
-            .rx_buf = (unsigned long)buffer,
+            .rx_buf = (unsigned long)in->buffer,
             .len = sizeof(spi_dummy_bytes),
             .speed_hz = spi_speed_hz,
             .bits_per_word = 8,
@@ -314,37 +320,34 @@ static ssize_t read_chunk(int fd, uint8_t *buffer,
         return -1;
     }
 
-    return filter_input(buffer, sizeof(spi_dummy_bytes), pending_escape_sequence);
+    return filter_input(in->buffer, sizeof(spi_dummy_bytes),
+                        &in->pending_escape_sequence);
 }
 
-static size_t consume_from_buffer(uint8_t *src, size_t *src_size,
-                                  uint8_t *dest, size_t dest_size)
+static size_t consume_from_buffer(struct spi_input_buffer *const restrict src,
+                                  uint8_t *const restrict dest, size_t dest_size)
 {
-    if(*src_size == 0 || dest_size == 0)
+    if(src->buffer_pos == 0 || dest_size == 0)
         return 0;
 
-    const size_t consumed = *src_size < dest_size ? *src_size : dest_size;
+    const size_t consumed =
+        src->buffer_pos < dest_size ? src->buffer_pos : dest_size;
 
-    memcpy(dest, src, consumed);
+    memcpy(dest, src->buffer, consumed);
 
-    if(consumed < *src_size)
+    if(consumed < src->buffer_pos)
     {
-        memmove(src, src + consumed, *src_size - consumed);
-        *src_size -= consumed;
+        memmove(src->buffer, src->buffer + consumed,
+                src->buffer_pos - consumed);
+        src->buffer_pos -= consumed;
     }
     else
-        *src_size = 0;
+        src->buffer_pos = 0;
 
     return consumed;
 }
 
-static struct
-{
-    uint8_t input_buffer[sizeof(spi_dummy_bytes)];
-    size_t input_buffer_pos;
-    bool pending_escape_sequence;
-}
-spi_read_globals;
+static struct spi_input_buffer global_spi_input_buffer;
 
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms)
@@ -355,21 +358,17 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
     /* first consume bytes from the buffer, if any */
     size_t output_buffer_pos =
-        consume_from_buffer(spi_read_globals.input_buffer,
-                            &spi_read_globals.input_buffer_pos,
-                            buffer, length);
+        consume_from_buffer(&global_spi_input_buffer, buffer, length);
 
     while(output_buffer_pos < length)
     {
-        log_assert(spi_read_globals.input_buffer_pos == 0);
+        log_assert(global_spi_input_buffer.buffer_pos == 0);
 
         /* read a few bytes from SPI into our buffer (with escape characters
          * removed); keep them around for potential extra bytes that have been
          * read, but were not requested by the caller (we cannot "unread" on
          * SPI) */
-        const ssize_t chunk_size =
-            read_chunk(fd, spi_read_globals.input_buffer,
-                       &spi_read_globals.pending_escape_sequence);
+        const ssize_t chunk_size = read_chunk(fd, &global_spi_input_buffer);
 
         /* error out in case of hard communication error and return what got so
          * far */
@@ -402,14 +401,13 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         }
 
         /* got something */
-        log_assert((size_t)chunk_size <= sizeof(spi_read_globals.input_buffer));
+        log_assert((size_t)chunk_size <= sizeof(global_spi_input_buffer.buffer));
 
         reset_timeout = true;
 
-        spi_read_globals.input_buffer_pos += chunk_size;
+        global_spi_input_buffer.buffer_pos += chunk_size;
         output_buffer_pos +=
-            consume_from_buffer(spi_read_globals.input_buffer,
-                                &spi_read_globals.input_buffer_pos,
+            consume_from_buffer(&global_spi_input_buffer,
                                 buffer + output_buffer_pos,
                                 length - output_buffer_pos);
     }
@@ -419,16 +417,16 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
 void spi_new_transaction(void)
 {
-    if(spi_read_globals.input_buffer_pos > 0)
+    if(global_spi_input_buffer.buffer_pos > 0)
         msg_info("Discarding %zu bytes from SPI receive buffer",
-                 spi_read_globals.input_buffer_pos);
+                 global_spi_input_buffer.buffer_pos);
 
     spi_reset();
 }
 
 void spi_reset(void)
 {
-    memset(&spi_read_globals, 0, sizeof(spi_read_globals));
+    memset(&global_spi_input_buffer, 0, sizeof(global_spi_input_buffer));
 }
 
 void spi_set_speed_hz(uint32_t hz)
