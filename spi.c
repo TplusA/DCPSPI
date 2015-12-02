@@ -115,6 +115,14 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
     while(1)
     {
+        if(is_slave_interrupting(user_data))
+        {
+            /* collision: while we were preparing to send something to the slave,
+             * it asserted the request line in order to send something to us */
+            msg_error(0, LOG_NOTICE, "Collision detected (interrupted by slave)");
+            return SPI_SEND_RESULT_COLLISION;
+        }
+
         int ret =
             spi_hw_do_transfer(fd, spi_transfer,
                                sizeof(spi_transfer) / sizeof(spi_transfer[0]));
@@ -124,14 +132,6 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
             msg_error(errno, LOG_EMERG,
                       "Failed waiting for slave device on fd %d", fd);
             return SPI_SEND_RESULT_FAILURE;
-        }
-
-        if(is_slave_interrupting(user_data))
-        {
-            /* collision: while we were preparing to send something to the slave,
-             * it asserted the request line in order to send something to us */
-            msg_error(0, LOG_NOTICE, "Collision detected (interrupted by slave)");
-            return SPI_SEND_RESULT_COLLISION;
         }
 
         for(size_t i = 0; i < sizeof(buffer); ++i)

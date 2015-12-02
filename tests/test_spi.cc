@@ -1062,7 +1062,6 @@ void test_collision_detection_by_gpio()
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (interrupted by slave)");
 
