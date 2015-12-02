@@ -258,7 +258,7 @@ static MockMessages *mock_messages;
 static MockOs *mock_os;
 static MockSPIHW *mock_spi_hw;
 
-void cut_setup(void)
+void cut_setup()
 {
     mock_messages = new MockMessages;
     cppcut_assert_not_null(mock_messages);
@@ -281,7 +281,7 @@ void cut_setup(void)
     spi_reset();
 }
 
-void cut_teardown(void)
+void cut_teardown()
 {
     mock_messages->check();
     mock_os->check();
@@ -359,7 +359,7 @@ static size_t expect_spi_transfers(size_t number_of_bytes)
 /*!\test
  * Regular happy case: just read some data from SPI slave, no escape character.
  */
-void test_read_from_spi(void)
+void test_read_from_spi()
 {
     std::array<uint8_t, 100> expected_content;
     for(size_t i = 0; i < expected_content.size(); ++i)
@@ -385,7 +385,7 @@ void test_read_from_spi(void)
 /*!\test
  * Read some data from SPI slave with escape characters inside.
  */
-void test_read_escaped_data_from_spi(void)
+void test_read_escaped_data_from_spi()
 {
     static const std::array<uint8_t, 27> escaped_data =
     {
@@ -435,7 +435,7 @@ void test_read_escaped_data_from_spi(void)
  * Write data in two short SPI transfers so that first transfer ends with an
  * escape character.
  */
-void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escape(void)
+void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escape()
 {
     /* 64 bytes, escape at offset 31 (last byte of first chunk), escaped data
      * at offset 32 (first byte of second chunk) */
@@ -464,7 +464,7 @@ void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escap
                             buffer.data(), buffer.size());
 }
 
-static void expect_spi_slave_gets_ready(void)
+static void expect_spi_slave_gets_ready()
 {
     /* let's assume get ready signal after one cycle */
     static const std::array<uint8_t, wait_for_slave_spi_transfer_size> slave_gets_ready =
@@ -484,7 +484,7 @@ static bool slave_does_not_interrupt(void *data)
 /*!\test
  * Regular happy case: just write some data to SPI slave, no escape character.
  */
-void test_write_to_spi(void)
+void test_write_to_spi()
 {
     expect_spi_slave_gets_ready();
 
@@ -511,7 +511,7 @@ void test_write_to_spi(void)
  * Note that the expected behavior is that all data are sent as-is! Escaping of
  * raw data must be done by calling #spi_fill_buffer_from_raw_data().
  */
-void test_write_escaped_data_to_spi(void)
+void test_write_escaped_data_to_spi()
 {
     expect_spi_slave_gets_ready();
 
@@ -535,7 +535,7 @@ void test_write_escaped_data_to_spi(void)
 /*!\test
  * Escape data for DCP-over-SPI.
  */
-void test_escape_data_for_dcp_over_spi(void)
+void test_escape_data_for_dcp_over_spi()
 {
     static const std::array<uint8_t, 6> raw_data =
     {
@@ -565,7 +565,7 @@ void test_escape_data_for_dcp_over_spi(void)
 /*!\test
  * Destination buffer size is respected while escaping data.
  */
-void test_too_small_buffer_for_escaped_data(void)
+void test_too_small_buffer_for_escaped_data()
 {
     static const std::array<uint8_t, 10> src_data =
     {
@@ -590,7 +590,7 @@ void test_too_small_buffer_for_escaped_data(void)
 /*!\test
  * Destination buffer size is respected while escaping last character.
  */
-void test_too_small_buffer_for_escaped_data_with_last_char_is_escape(void)
+void test_too_small_buffer_for_escaped_data_with_last_char_is_escape()
 {
     static const std::array<uint8_t, 5> src_data =
     {
@@ -615,7 +615,7 @@ void test_too_small_buffer_for_escaped_data_with_last_char_is_escape(void)
 /*!\test
  * Destination buffer size is respected while escaping last character.
  */
-void test_too_small_buffer_for_escaped_data_with_last_char_is_uint8_max(void)
+void test_too_small_buffer_for_escaped_data_with_last_char_is_uint8_max()
 {
     static const std::array<uint8_t, 5> src_data =
     {
@@ -664,7 +664,7 @@ static void expect_buffer_content(std::array<uint8_t, N> &buffer,
  * Timeout during read due to extreme latency (context switch) between time
  * measurements.
  */
-void test_timeout_without_any_read_is_not_possible(void)
+void test_timeout_without_any_read_is_not_possible()
 {
     static const struct timespec t1 =
     {
@@ -697,7 +697,7 @@ void test_timeout_without_any_read_is_not_possible(void)
  * Timeout is measured in nanoseconds and therefore only limited by system
  * timer resolution.
  */
-void test_read_timeout_is_precisely_measured(void)
+void test_read_timeout_is_precisely_measured()
 {
     static const struct timespec t1 =
     {
@@ -738,7 +738,7 @@ void test_read_timeout_is_precisely_measured(void)
  * Timeout expiration is also computed correctly when overflowing the
  * nanoseconds in the \c timespec structure.
  */
-void test_timeout_overflow_in_struct_timespec(void)
+void test_timeout_overflow_in_struct_timespec()
 {
     static const struct timespec t1 =
     {
@@ -787,7 +787,7 @@ void test_timeout_overflow_in_struct_timespec(void)
 /*!\test
  * Timeout handling also works on a seconds scale.
  */
-void test_long_timeout(void)
+void test_long_timeout()
 {
     static const struct timespec t1 =
     {
@@ -846,7 +846,7 @@ void test_long_timeout(void)
  *     Some refactoring of the production code should be done to make the real
  *     transaction code testable.
  */
-void test_new_spi_slave_transaction_clears_internal_receive_buffer(void)
+void test_new_spi_slave_transaction_clears_internal_receive_buffer()
 {
     static const std::array<uint8_t, read_from_slave_spi_transfer_size> slave_request_data[2] =
     {
@@ -921,7 +921,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer(void)
  * Timeout during write due to extreme latency (context switch) between time
  * measurements.
  */
-void test_send_timeout_without_any_write_is_not_possible(void)
+void test_send_timeout_without_any_write_is_not_possible()
 {
     static const struct timespec t1 =
     {
@@ -954,7 +954,7 @@ void test_send_timeout_without_any_write_is_not_possible(void)
  * Before sending data, wait for slave until it gets ready, timeout does not
  * expire.
  */
-void test_send_to_slave_waits_for_zero_byte_answer_before_sending(void)
+void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
 {
     struct timespec t =
     {
@@ -1003,7 +1003,7 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending(void)
 /*!\test
  * Before sending data, wait for slave until timeout expires.
  */
-void test_send_to_slave_may_fail_due_to_timeout(void)
+void test_send_to_slave_may_fail_due_to_timeout()
 {
     struct timespec t =
     {
@@ -1059,7 +1059,7 @@ void test_send_to_slave_may_fail_due_to_timeout(void)
  * #spi_send_buffer(). Collision handling is done in the layer on top and
  * should be tested somewhere else.
  */
-void test_collision_detection(void)
+void test_collision_detection()
 {
     struct timespec t =
     {
