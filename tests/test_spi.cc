@@ -974,11 +974,8 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
         mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
         t.tv_nsec += 2UL * 1000UL * 1000UL;
 
-        const auto slave_writes = ((i % 2) == 0
-                                   ? spi_rw_data_t::EXPECT_READ_NOPS
-                                   : spi_rw_data_t::EXPECT_READ_NON_ZERO);
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
-                                                           slave_writes,
+                                                           spi_rw_data_t::EXPECT_READ_NOPS,
                                                            true);
         mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     }
@@ -1060,14 +1057,14 @@ void test_send_to_slave_may_fail_due_to_timeout()
  * #spi_send_buffer(). Collision handling is done in the layer on top and
  * should be tested somewhere else.
  */
-void test_collision_detection()
+void test_collision_detection_by_gpio()
 {
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
-                                              "Collision detected");
+                                              "Collision detected (interrupted by slave)");
 
     std::array<uint8_t, 10> buffer;
     buffer.fill(0x55);
@@ -1076,6 +1073,35 @@ void test_collision_detection()
                         spi_send_buffer(expected_spi_fd,
                                         buffer.data(), buffer.size(), 1000,
                                         slave_is_interrupting, NULL));
+}
+
+/*!\test
+ * Collisions are detected when the slave device sends non-NOP, non-zero bytes
+ * when being polled (see #161).
+ *
+ * The test only checks if detection is done the right way. Collision handling
+ * is done in the layer on top and should be tested somewhere else.
+ */
+void test_collision_detection_by_inspecting_poll_bytes()
+{
+    spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                       spi_rw_data_t::EXPECT_READ_NON_ZERO,
+                                                       true);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "Collision detected (got funny poll bytes)");
+
+    std::array<uint8_t, 10> buffer;
+    buffer.fill(0x55);
+
+    cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
+                        spi_send_buffer(expected_spi_fd,
+                                        buffer.data(), buffer.size(), 1000,
+                                        slave_does_not_interrupt, NULL));
 }
 
 };

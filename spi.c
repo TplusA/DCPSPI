@@ -123,15 +123,19 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
         {
             /* collision: while we were preparing to send something to the slave,
              * it asserted the request line in order to send something to us */
-            msg_error(0, LOG_NOTICE, "Collision detected");
+            msg_error(0, LOG_NOTICE, "Collision detected (interrupted by slave)");
             return SPI_SEND_RESULT_COLLISION;
         }
 
         for(size_t i = 0; i < sizeof(buffer); ++i)
         {
-            /* slave sent zero byte, so it's ready to accept data */
             if(buffer[i] == 0)
                 return SPI_SEND_RESULT_OK;
+            else if(buffer[i] != UINT8_MAX)
+            {
+                msg_error(0, LOG_NOTICE, "Collision detected (got funny poll bytes)");
+                return SPI_SEND_RESULT_COLLISION;
+            }
         }
 
         /* only NOPs, try again if we are within the specified timeout... */
