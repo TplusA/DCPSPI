@@ -93,11 +93,65 @@ static bool timeout_expired(const struct timespec *restrict timeout,
     return current->tv_nsec >= timeout->tv_nsec;
 }
 
+static inline uint8_t unescape_byte(uint8_t byte)
+{
+    return byte == 0x01 ? UINT8_MAX : byte;
+}
+
+static bool skip_nops(const uint8_t *const src, size_t src_size,
+                      size_t *const src_pos)
+{
+    for(/* nothing */; *src_pos < src_size; ++*src_pos)
+    {
+        if(src[*src_pos] != UINT8_MAX)
+            return true;
+    }
+
+    return false;
+}
+
+static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
+                           bool *const pending_escape_sequence)
+{
+    size_t src_pos = 0;
+
+    if(!skip_nops(buffer, buffer_size, &src_pos))
+        return 0;
+
+    size_t dest_pos = 0;
+
+    if(*pending_escape_sequence)
+    {
+        buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
+        *pending_escape_sequence = false;
+    }
+
+    while(skip_nops(buffer, buffer_size, &src_pos))
+    {
+        const uint8_t ch = buffer[src_pos++];
+
+        if(ch == DCP_ESCAPE_CHARACTER)
+        {
+            if(!skip_nops(buffer, buffer_size, &src_pos))
+            {
+                *pending_escape_sequence = true;
+                return dest_pos;
+            }
+
+            buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
+        }
+        else
+            buffer[dest_pos++] = ch;
+    }
+
+    return dest_pos;
+}
+
 static enum SpiSendResult
 wait_for_spi_slave(int fd, unsigned int timeout_ms,
                    uint8_t *const buffer, const size_t buffer_size,
                    bool (*is_slave_interrupting)(void *data), void *user_data,
-                   size_t *significant_data_offset)
+                   bool *have_significant_data)
 {
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -110,7 +164,7 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
         },
     };
 
-    *significant_data_offset = buffer_size;
+    *have_significant_data = false;
 
     struct timespec expiration_time;
     compute_expiration_time(&expiration_time, timeout_ms);
@@ -143,7 +197,7 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
             else if(buffer[i] != UINT8_MAX)
             {
                 msg_error(0, LOG_NOTICE, "Collision detected (got funny poll bytes)");
-                *significant_data_offset = i;
+                *have_significant_data = true;
                 return SPI_SEND_RESULT_COLLISION;
             }
         }
@@ -170,6 +224,27 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
     }
 }
 
+static void handle_collision(uint8_t *const poll_bytes_buffer,
+                             const size_t poll_bytes_buffer_size,
+                             struct spi_input_buffer *in)
+{
+    bool pending_escape_sequence = false;
+    const size_t bytes_left = filter_input(poll_bytes_buffer,
+                                           poll_bytes_buffer_size,
+                                           &pending_escape_sequence);
+
+    if(bytes_left == 0)
+        return;
+
+    if(in->buffer_pos > 0)
+        BUG("Discarding %zu bytes from SPI receive buffer after collision",
+            in->buffer_pos);
+
+    memcpy(in->buffer, poll_bytes_buffer, bytes_left);
+    in->buffer_pos = bytes_left;
+    in->pending_escape_sequence = pending_escape_sequence;
+}
+
 static struct spi_input_buffer global_spi_input_buffer;
 
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
@@ -184,28 +259,18 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     }
 
     uint8_t poll_bytes_buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
-    size_t significant_data_offset;
+    bool have_significant_data;
     const enum SpiSendResult wait_result =
         wait_for_spi_slave(fd, timeout_ms,
                            poll_bytes_buffer, sizeof(poll_bytes_buffer),
                            is_slave_interrupting, user_data,
-                           &significant_data_offset);
+                           &have_significant_data);
 
     if(wait_result != SPI_SEND_RESULT_OK)
     {
-        if(wait_result == SPI_SEND_RESULT_COLLISION &&
-           significant_data_offset < sizeof(poll_bytes_buffer))
-        {
-            if(global_spi_input_buffer.buffer_pos > 0)
-                BUG("Discarding %zu bytes from SPI receive buffer after collision",
-                    global_spi_input_buffer.buffer_pos);
-
-            global_spi_input_buffer.buffer_pos =
-                sizeof(poll_bytes_buffer) - significant_data_offset;
-            memcpy(global_spi_input_buffer.buffer,
-                   poll_bytes_buffer + significant_data_offset,
-                   global_spi_input_buffer.buffer_pos);
-        }
+        if(wait_result == SPI_SEND_RESULT_COLLISION && have_significant_data)
+            handle_collision(poll_bytes_buffer, sizeof(poll_bytes_buffer),
+                             &global_spi_input_buffer);
 
         return wait_result;
     }
@@ -260,60 +325,6 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
     }
 
     return pos;
-}
-
-static inline uint8_t unescape_byte(uint8_t byte)
-{
-    return byte == 0x01 ? UINT8_MAX : byte;
-}
-
-static bool skip_nops(const uint8_t *const src, size_t src_size,
-                      size_t *const src_pos)
-{
-    for(/* nothing */; *src_pos < src_size; ++*src_pos)
-    {
-        if(src[*src_pos] != UINT8_MAX)
-            return true;
-    }
-
-    return false;
-}
-
-static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
-                           bool *const pending_escape_sequence)
-{
-    size_t src_pos = 0;
-
-    if(!skip_nops(buffer, buffer_size, &src_pos))
-        return 0;
-
-    size_t dest_pos = 0;
-
-    if(*pending_escape_sequence)
-    {
-        buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
-        *pending_escape_sequence = false;
-    }
-
-    while(skip_nops(buffer, buffer_size, &src_pos))
-    {
-        const uint8_t ch = buffer[src_pos++];
-
-        if(ch == DCP_ESCAPE_CHARACTER)
-        {
-            if(!skip_nops(buffer, buffer_size, &src_pos))
-            {
-                *pending_escape_sequence = true;
-                return dest_pos;
-            }
-
-            buffer[dest_pos++] = unescape_byte(buffer[src_pos++]);
-        }
-        else
-            buffer[dest_pos++] = ch;
-    }
-
-    return dest_pos;
 }
 
 /*!
