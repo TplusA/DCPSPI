@@ -1,17 +1,1 @@
-#! /bin/sh
-
-if test "x$VALGRIND" = x
-then
-    exit 0
-fi
-
-exec $VALGRIND \
-    --trace-children=yes \
-    --xml=yes --xml-file=valgrind.xml \
-    --leak-check=full --show-reachable=yes --error-limit=no \
-    --suppressions="@srcdir@/cutter-1_2_4.supp" \
-    --suppressions="@srcdir@/cutter-children-1_2_4.supp" \
-$CUTTER \
-    --source-directory="@srcdir@" \
-    --keep-opening-modules \
-    "$@" .
+../strbo_common/tests/valgrind.sh.in

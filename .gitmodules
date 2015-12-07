@@ -1,0 +1,3 @@
+[submodule "strbo_common"]
+	path = strbo_common
+	url = http://git.tua.local/repo/StrBo-Common
