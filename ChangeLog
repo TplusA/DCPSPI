@@ -1,3 +1,13 @@
+2016-01-14  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.6 released.
+
+	* Protocol: Fix handling of escape sequences in collisions.
+
+	* GPIO: Wait longer for sysfs files to become accessible. During boot,
+	  the system is very busy; it can take udev much longer to configure
+	  sysfs permissions than we've been expecting in v1.5.
+
 2015-12-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.5 released.
@@ -63,4 +73,4 @@
 	* First release for testing.
 
 
-Copyright 2015 T+A elektroakustik GmbH & Co. KG
+Copyright 2015, 2016 T+A elektroakustik GmbH & Co. KG
