@@ -1143,7 +1143,7 @@ void test_collision_detection_by_gpio()
  */
 void test_collision_detection_by_inspecting_poll_bytes()
 {
-    /* polling takes place because the request list is not asserted (not yet or
+    /* polling takes place because the request line is not asserted (not yet or
      * not anymore---we will never know) */
     spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
                                                        spi_rw_data_t::EXPECT_READ_NON_ZERO,
