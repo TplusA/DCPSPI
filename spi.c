@@ -234,14 +234,13 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
                                            poll_bytes_buffer_size,
                                            &pending_escape_sequence);
 
-    if(bytes_left == 0)
-        return;
-
     if(in->buffer_pos > 0)
         BUG("Discarding %zu bytes from SPI receive buffer after collision",
             in->buffer_pos);
 
-    memcpy(in->buffer, poll_bytes_buffer, bytes_left);
+    if(bytes_left > 0)
+        memcpy(in->buffer, poll_bytes_buffer, bytes_left);
+
     in->buffer_pos = bytes_left;
     in->pending_escape_sequence = pending_escape_sequence;
 }
