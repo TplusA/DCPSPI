@@ -194,7 +194,8 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
         {
             if(buffer[i] == 0)
                 return SPI_SEND_RESULT_OK;
-            else if(buffer[i] != UINT8_MAX)
+
+            if(buffer[i] != UINT8_MAX)
             {
                 msg_error(0, LOG_NOTICE, "Collision detected (got funny poll bytes)");
                 *have_significant_data = true;
