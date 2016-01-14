@@ -132,21 +132,23 @@ static int wait_for_path(const char *path, int tries,
 
 static int hook_to_gpio(unsigned int num)
 {
+    static const char sys_class_gpio[] = "/sys/class/gpio";
+
     char export_dir[32];
-    snprintf(export_dir, sizeof(export_dir), "/sys/class/gpio/gpio%u", num);
+    snprintf(export_dir, sizeof(export_dir), "%s/gpio%u", sys_class_gpio, num);
 
     char buffer[10];
     size_t buffer_length;
+    const char *filename;
 
     if(wait_for_path(export_dir, 1, 0, 0, false) < 0)
     {
         buffer_length = snprintf(buffer, sizeof(buffer), "%u", num);
 
-        if(write_to_gpio_file("/sys/class/gpio/export", buffer, buffer_length) < 0)
+        filename = mk_gpio_name(sys_class_gpio, "export");
+        if(write_to_gpio_file(filename, buffer, buffer_length) < 0)
             return -1;
     }
-
-    const char *filename;
 
     filename = mk_gpio_name(export_dir, "direction");
     if(wait_for_path(filename, 50, 10, 200, true) < 0)
