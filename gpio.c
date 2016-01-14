@@ -23,12 +23,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <errno.h>
 
 #include "gpio.h"
+#include "os.h"
 #include "messages.h"
 
 struct gpio_handle
@@ -92,9 +92,13 @@ static const char *mk_gpio_name(const char *prefix, const char *filename)
 }
 
 static int wait_for_path(const char *path, int tries,
-                         unsigned int sleep_ms_between_tries,
+                         unsigned int min_sleep_ms_between_tries,
+                         unsigned int max_sleep_ms_between_tries,
                          bool show_error)
 {
+    unsigned int sleep_ms_between_tries = 0;
+    struct timespec tp = { 0 };
+
     while(1)
     {
         if(access(path, W_OK) == 0)
@@ -108,7 +112,21 @@ static int wait_for_path(const char *path, int tries,
             return -1;
         }
 
-        usleep(1000U * sleep_ms_between_tries);
+        if(sleep_ms_between_tries < max_sleep_ms_between_tries)
+        {
+            if(sleep_ms_between_tries < min_sleep_ms_between_tries)
+                sleep_ms_between_tries = min_sleep_ms_between_tries;
+            else
+                sleep_ms_between_tries *= 2;
+
+            if(sleep_ms_between_tries > max_sleep_ms_between_tries)
+                sleep_ms_between_tries = max_sleep_ms_between_tries;
+
+            tp.tv_sec = sleep_ms_between_tries / 1000U;
+            tp.tv_nsec = (sleep_ms_between_tries % 1000) * 1000UL * 1000UL;
+        }
+
+        os_nanosleep(&tp);
     }
 }
 
@@ -120,7 +138,7 @@ static int hook_to_gpio(unsigned int num)
     char buffer[10];
     size_t buffer_length;
 
-    if(wait_for_path(export_dir, 1, 0, false) < 0)
+    if(wait_for_path(export_dir, 1, 0, 0, false) < 0)
     {
         buffer_length = snprintf(buffer, sizeof(buffer), "%u", num);
 
@@ -131,7 +149,7 @@ static int hook_to_gpio(unsigned int num)
     const char *filename;
 
     filename = mk_gpio_name(export_dir, "direction");
-    if(wait_for_path(filename, 50, 10, true) < 0)
+    if(wait_for_path(filename, 50, 10, 200, true) < 0)
         return -1;
 
     buffer_length = snprintf(buffer, sizeof(buffer), "%s", "in");
@@ -139,7 +157,7 @@ static int hook_to_gpio(unsigned int num)
         return -1;
 
     filename = mk_gpio_name(export_dir, "edge");
-    if(wait_for_path(filename, 50, 10, true) < 0)
+    if(wait_for_path(filename, 50, 10, 150, true) < 0)
         return -1;
 
     buffer_length = snprintf(buffer, sizeof(buffer), "%s", "both");
