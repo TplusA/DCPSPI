@@ -70,8 +70,7 @@ static int write_to_gpio_file(const char *filename, const char *buffer,
         ret = -1;
     }
 
-    while((temp = close(fd)) == -1 && errno == EINTR)
-        ;
+    os_file_close(fd);
 
     if(temp < 0)
     {
@@ -148,6 +147,8 @@ static int hook_to_gpio(unsigned int num)
         filename = mk_gpio_name(sys_class_gpio, "export");
         if(write_to_gpio_file(filename, buffer, buffer_length) < 0)
             return -1;
+
+        os_sync_dir(sys_class_gpio);
     }
 
     filename = mk_gpio_name(export_dir, "direction");
