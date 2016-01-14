@@ -103,7 +103,7 @@ static int wait_for_path(const char *path, int tries,
         if(--tries <= 0)
         {
             if(show_error)
-                msg_error(errno, LOG_EMERG, "Path \"%s\" does not exist", path);
+                msg_error(errno, LOG_EMERG, "Path \"%s\" not accessible", path);
 
             return -1;
         }
