@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -32,7 +32,7 @@
 /*!
  * SPI speed in Hz for all transfers.
  */
-static uint32_t spi_speed_hz = 1000U * 1000U;
+static uint32_t spi_speed_hz = 900U * 1000U;
 
 /*!
  * Kernel spidev driver defaults to writing hard-coded 0's in case we
