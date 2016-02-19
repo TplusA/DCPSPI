@@ -788,7 +788,7 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 {
     msg_info("Ready for accepting traffic");
 
-    static uint8_t dcp_double_buffer[260][2];
+    static uint8_t dcp_double_buffer[2][260];
     static uint8_t spi_backing_buffer[260 * 2];
 
     struct dcp_transaction transaction =
