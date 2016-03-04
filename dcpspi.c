@@ -211,8 +211,6 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
 
 static void reset_transaction_struct(struct dcp_transaction *transaction)
 {
-    msg_info("## Reset transaction");
-
     transaction->state = TR_IDLE;
 
     clear_buffer(&transaction->dcp_buffer);
@@ -326,10 +324,8 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
 {
     const char *read_peer =
         (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
-    const char *write_peer =
-        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "DCPD" : "slave";
 
-    msg_info("%s: need to receive %u bytes from %s",
+    msg_info("%s: expecting %u bytes from %s",
              tr_log_prefix(transaction->state),
              transaction->pending_size_of_transaction, read_peer);
 
@@ -353,13 +349,10 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
         transaction->dcp_buffer.pos += bytes_read;
 
     transaction->pending_size_of_transaction -= (size_t)bytes_read;
-    msg_info("%s: still pending %u", tr_log_prefix(transaction->state),
-             transaction->pending_size_of_transaction);
 
     if(transaction->pending_size_of_transaction == 0 ||
        is_buffer_full(&transaction->dcp_buffer))
     {
-        msg_info("%s: flush buffer to %s", tr_log_prefix(transaction->state), write_peer);
         transaction->flush_to_dcpd_buffer_pos = 0;
         if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD)
             transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
@@ -390,12 +383,10 @@ static void process_transaction(struct dcp_transaction *transaction,
         {
           case REQ_NOT_REQUESTED:
             transaction->state = TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD;
-            msg_info("%s: begin (assuming write command)", tr_log_prefix(transaction->state));
             break;
 
           case REQ_ASSERTED:
             transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
-            msg_info("%s: begin", tr_log_prefix(transaction->state));
             spi_new_transaction();
             return;
 
@@ -409,7 +400,6 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
       case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
-        msg_info("%s: receiving command header from DCPD", tr_log_prefix(transaction->state));
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
                                DCP_HEADER_SIZE - transaction->dcp_buffer.pos,
                                fifo_in_fd) < 0)
@@ -422,7 +412,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         if(transaction->dcp_buffer.pos != DCP_HEADER_SIZE)
         {
-            msg_info("%s: header incomplete, waiting for more input",
+            msg_info("%s: header from DCPD incomplete, waiting for more input",
                      tr_log_prefix(transaction->state));
             break;
         }
@@ -433,7 +423,7 @@ static void process_transaction(struct dcp_transaction *transaction,
          * the receiver of the data. We simply assume that we have a header
          * here and that the length can be determined.
          */
-        msg_info("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x",
+        msg_info("%s: command header from DCPD: 0x%02x 0x%02x 0x%02x 0x%02x",
                  tr_log_prefix(transaction->state),
                  transaction->dcp_buffer.buffer[0],
                  transaction->dcp_buffer.buffer[1],
@@ -470,9 +460,9 @@ static void process_transaction(struct dcp_transaction *transaction,
                                           transaction->dcp_buffer.buffer,
                                           transaction->dcp_buffer.pos);
 
-        msg_info("%s: send %zu bytes over SPI (were %zu bytes)",
+        msg_info("%s: send %zu bytes over SPI",
                  tr_log_prefix(transaction->state),
-                 transaction->spi_buffer.pos, transaction->dcp_buffer.pos);
+                 transaction->spi_buffer.pos);
 
         const enum SpiSendResult ret =
             spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
@@ -522,12 +512,10 @@ static void process_transaction(struct dcp_transaction *transaction,
         if(leave_switch)
             break;
 
-        msg_info("%s: DONE", tr_log_prefix(transaction->state));
         reset_transaction(transaction);
         break;
 
       case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-        msg_info("%s: receiving command header from slave", tr_log_prefix(transaction->state));
         if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
                            DCP_HEADER_SIZE, spi_timeout_ms) < DCP_HEADER_SIZE)
         {
@@ -537,7 +525,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         transaction->dcp_buffer.pos = DCP_HEADER_SIZE;
 
-        msg_info("%s: command header received: 0x%02x 0x%02x 0x%02x 0x%02x",
+        msg_info("%s: command header from SPI: 0x%02x 0x%02x 0x%02x 0x%02x",
                  tr_log_prefix(transaction->state),
                  transaction->dcp_buffer.buffer[0],
                  transaction->dcp_buffer.buffer[1],
@@ -580,10 +568,9 @@ static void process_transaction(struct dcp_transaction *transaction,
 
       case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
       case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
-        msg_info("%s: send %zu bytes answer to DCPD (%zu pending)",
+        msg_info("%s: send %zu bytes to DCPD",
                  tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.pos,
-                 transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos);
+                 transaction->dcp_buffer.pos);
 
         ssize_t sent_bytes =
             send_buffer_to_fd(&transaction->dcp_buffer,
@@ -609,10 +596,7 @@ static void process_transaction(struct dcp_transaction *transaction,
                 transaction->state = TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD;
             }
             else
-            {
-                msg_info("%s: DONE", tr_log_prefix(transaction->state));
                 reset_transaction(transaction);
-            }
         }
         break;
 
@@ -692,8 +676,6 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
             .events = POLLIN,
         },
     };
-
-    msg_info("Waiting for activities.");
 
     int ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
 
@@ -786,7 +768,7 @@ static void wait_for_dcp_data(struct dcp_transaction *transaction,
 static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
                       const int spi_fd, const struct gpio_handle *const gpio)
 {
-    msg_info("Ready for accepting traffic");
+    msg_info("Accepting traffic");
 
     static uint8_t dcp_double_buffer[2][260];
     static uint8_t spi_backing_buffer[260 * 2];
