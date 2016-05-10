@@ -36,6 +36,7 @@
 
 ssize_t (*os_read)(int fd, void *dest, size_t count) = read;
 ssize_t (*os_write)(int fd, const void *buf, size_t count) = write;
+int (*os_poll)(struct pollfd *fds, nfds_t nfds, int timeout) = poll;
 
 static void show_version_info(void)
 {

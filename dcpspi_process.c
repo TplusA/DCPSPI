@@ -28,6 +28,7 @@
 #include "named_pipe.h"
 #include "gpio.h"
 #include "messages.h"
+#include "os.h"
 
 /*!
  * Whether or not the DCP process is allowed to send any data.
@@ -65,7 +66,7 @@ static int fill_buffer_from_fd(struct buffer *buffer, size_t count, int fd)
     if(count == 0)
         return 0;
 
-    ssize_t len = read(fd, buffer->buffer + buffer->pos, count);
+    ssize_t len = os_read(fd, buffer->buffer + buffer->pos, count);
 
     if(len > 0)
     {
@@ -92,7 +93,7 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
 {
     errno = 0;
 
-    ssize_t len = write(fd, buffer->buffer + offset, count);
+    ssize_t len = os_write(fd, buffer->buffer + offset, count);
 
     if(len > 0)
         return len;
@@ -571,7 +572,7 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
         },
     };
 
-    int ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
+    int ret = os_poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
 
     if(ret <= 0)
     {
