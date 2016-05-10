@@ -36,7 +36,7 @@ AM_CXXFLAGS = $(CXXWARNINGS)
 
 LIBS += $(CPPCUTTER_LIBS)
 
-check_LTLIBRARIES = test_spi.la
+check_LTLIBRARIES = test_spi.la test_complete.la
 
 test_spi_la_SOURCES = \
     test_spi.cc \
@@ -47,6 +47,17 @@ test_spi_la_SOURCES = \
 test_spi_la_LIBADD = ../libspi.la
 test_spi_la_CFLAGS = $(AM_CFLAGS)
 test_spi_la_CXXFLAGS = $(AM_CXXFLAGS)
+
+test_complete_la_SOURCES = \
+    test_complete.cc \
+    mock_os.hh mock_os.cc \
+    mock_messages.hh mock_messages.cc \
+    mock_spi_hw.hh mock_spi_hw.cc spi_hw_data.hh \
+    mock_gpio.hh mock_gpio.cc \
+    mock_expectation.hh
+test_complete_la_LIBADD = ../libdcpspi.la ../libspi.la
+test_complete_la_CFLAGS = $(AM_CFLAGS)
+test_complete_la_CXXFLAGS = $(AM_CXXFLAGS)
 
 CLEANFILES = test_report.xml test_report_junit.xml valgrind.xml
 
