@@ -42,7 +42,7 @@ test_spi_la_SOURCES = \
     test_spi.cc \
     mock_os.hh mock_os.cc \
     mock_messages.hh mock_messages.cc \
-    mock_spi_hw.hh mock_spi_hw.cc \
+    mock_spi_hw.hh mock_spi_hw.cc spi_hw_data.hh  \
     mock_expectation.hh
 test_spi_la_LIBADD = ../libspi.la
 test_spi_la_CFLAGS = $(AM_CFLAGS)
