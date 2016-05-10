@@ -29,18 +29,23 @@ EXTRA_DIST = README.md cppcheck_suppressed.txt
 CLEANFILES = README.html
 
 dcpspi_SOURCES = \
-    dcpspi.c dcpdefs.h os.c os.h messages.c messages.h \
+    dcpspi.c dcpspi_process.h dcpdefs.h os.c os.h messages.c messages.h \
     named_pipe.c named_pipe.h \
     gpio.c gpio.h spi.h spi_hw.c spi_hw.h
 
 AM_CFLAGS = $(CWARNINGS)
 
-noinst_LTLIBRARIES = libspi.la
+noinst_LTLIBRARIES = libspi.la libdcpspi.la
 
 dcpspi_LDADD = $(noinst_LTLIBRARIES)
 
 libspi_la_SOURCES = spi.c spi.h spi_hw.h dcpdefs.h messages.h os.h
 libspi_la_CFLAGS = $(AM_CFLAGS)
+
+libdcpspi_la_SOURCES = \
+    dcpspi_process.c dcpspi_process.h dcpdefs.h \
+    named_pipe.h gpio.h spi.h os.h messages.h
+libdcpspi_la_CFLAGS = $(AM_CFLAGS)
 
 BUILT_SOURCES = versioninfo.h
 
