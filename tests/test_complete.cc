@@ -249,7 +249,7 @@ void cut_teardown()
     delete process_data;
     process_data = nullptr;
 
-    os_write_buffer.clear();
+    cut_assert_true(os_write_buffer.empty());
     os_write_buffer.shrink_to_fit();
 
     mock_messages->check();
