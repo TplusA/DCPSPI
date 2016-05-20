@@ -163,6 +163,8 @@ static const int expected_fifo_out_fd = 50;
 static const int expected_gpio_fd = 60;
 static const int expected_spi_fd = 70;
 
+static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
+
 static MockMessages *mock_messages;
 static MockOs *mock_os;
 static MockSPIHW *mock_spi_hw;
@@ -337,8 +339,6 @@ static void expect_no_more_actions()
  */
 void test_single_slave_write_transaction()
 {
-    static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
-
     /* slave activates the request GPIO */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
     poll_result.set_gpio_events(POLLPRI).set_return_value(1);
@@ -430,8 +430,6 @@ void test_single_slave_write_transaction()
  */
 void test_single_slave_read_transaction()
 {
-    static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
-
     /* slave activates the request GPIO */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
     poll_result.set_gpio_events(POLLPRI).set_return_value(1);
@@ -566,8 +564,6 @@ void test_single_slave_read_transaction()
  */
 void test_single_master_write_transaction()
 {
-    static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
-
     /* DCPD sends something through its pipe */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
     poll_result.set_dcpd_events(POLLIN).set_return_value(1);
