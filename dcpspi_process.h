@@ -62,15 +62,56 @@ struct buffer
     size_t pos;
 };
 
+/*!
+ * Request line monitoring for slave transactions.
+ */
 enum slave_request_line_state_t
 {
-    REQ_NOT_REQUESTED = 0,
-    REQ_ASSERTED,
-    REQ_DEASSERTED,
+    REQ_NOT_REQUESTED = 0,  /*!< For idle and master transactions. */
+    REQ_ASSERTED,           /*!< Slave transactions: Request line was asserted
+                             *   the last time we looked. */
+    REQ_DEASSERTED,         /*!< Slave transactions: Request line was
+                             *   deasserted, transaction may finish. */
 };
 
 /*!
  * State of the DCP transaction in progress.
+ *
+ * This structure contains all there is to know about a transaction. A
+ * transaction has a state of type #transaction_state, where #TR_IDLE means
+ * that there is no transaction going on.
+ *
+ * The request line state is read out at certain points in the program. This
+ * state is stored in the transaction as \e request \e line \e state of type
+ * #slave_request_line_state_t. The idle transaction is in request line state
+ * #REQ_NOT_REQUESTED.
+ *
+ * As soon as the request line is asserted, the idle transaction is set to
+ * request line state #REQ_ASSERTED and it gets processed, meaning that its
+ * state is propagated to #TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE and data is
+ * read from SPI. The transaction is then called a \e slave \e transaction. If
+ * the request line is deasserted while the transaction is processed, its
+ * request line state is propagated to #REQ_DEASSERTED. The transaction is not
+ * considered finished as long as the state remains #REQ_ASSERTED. If
+ * necessary, the transaction processing code will wait for the #REQ_DEASSERTED
+ * state even if the transaction has otherwise been completely processed.
+ *
+ * Otherwise, the idle transaction is propagated to state
+ * #TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD in case the named pipe from
+ * DCPD contains any data, but the request line has not been asserted. In this
+ * case, the request line state remains #REQ_NOT_REQUESTED. The transaction is
+ * then called a \e master \e transaction.
+ *
+ * As long as the SPI slave as has not signaled its ready state and thus
+ * committed to any transaction, a master transaction can be interrupted by
+ * asserting the request line. This may happen at any time before the ready
+ * state has been clearly signaled by a short SPI poll phase because the slave
+ * does not know anything about the transaction yet. The ready state poll phase
+ * itself may also be interrupted by data that indicates non-ready state, which
+ * is treated the same as an asserted request line at that point. Both cases
+ * are called a \e collision. After the ready state has been signaled, however,
+ * the request line is basically ignored and the master transaction is going to
+ * be processed until its end.
  */
 struct dcp_transaction
 {
@@ -83,6 +124,9 @@ struct dcp_transaction
     size_t flush_to_dcpd_buffer_pos;
     bool pending_escape_sequence_in_spi_buffer;
 
+    /*!
+     * Request line state changes while the transaction is processed.
+     */
     enum slave_request_line_state_t request_state;
 };
 
