@@ -136,7 +136,6 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
     struct collision_check_data ccdata =
     {
         .gpio = gpio,
-        .current_transaction = &transaction,
     };
 
     reset_transaction_struct(&transaction);

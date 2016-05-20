@@ -89,7 +89,6 @@ struct dcp_transaction
 struct collision_check_data
 {
     const struct gpio_handle *gpio;
-    const struct dcp_transaction *current_transaction;
 };
 
 #ifdef __cplusplus

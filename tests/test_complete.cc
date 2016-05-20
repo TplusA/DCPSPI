@@ -149,7 +149,6 @@ class ProcessData
         deferred_transaction_data.size = sizeof(deferred_dcp_buffer);
 
         ccdata.gpio = gpio;
-        ccdata.current_transaction = &transaction;
     }
 
     ~ProcessData()
