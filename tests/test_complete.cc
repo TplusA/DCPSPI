@@ -278,6 +278,8 @@ void cut_teardown()
 
 static void expect_no_more_actions()
 {
+    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+
     for(int i = 0; i < 3; ++i)
     {
         mock_gpio->expect_gpio_is_active(false, process_data->gpio);
@@ -289,9 +291,21 @@ static void expect_no_more_actions()
                                        &process_data->deferred_transaction_data,
                                        &process_data->ccdata,
                                        &process_data->prev_gpio_state));
+
+        cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
     }
+
+    cppcut_assert_equal(size_t(0), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(REQ_NOT_REQUESTED, process_data->transaction.request_state);
+    cppcut_assert_equal(size_t(0), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
 }
 
+/*!\test
+ * Show how a write transaction from the SPI slave travels through the system.
+ */
 void test_single_slave_write_transaction()
 {
     static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
@@ -307,6 +321,8 @@ void test_single_slave_write_transaction()
                                    &process_data->deferred_transaction_data,
                                    &process_data->ccdata,
                                    &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
 
     /* slave sends write command for UPnP friendly name */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
@@ -324,6 +340,8 @@ void test_single_slave_write_transaction()
                                    &process_data->ccdata,
                                    &process_data->prev_gpio_state));
 
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE, process_data->transaction.state);
+
     /* process the rest of the SPI input buffer */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
     mock_messages->expect_msg_info_formatted(
@@ -337,6 +355,7 @@ void test_single_slave_write_transaction()
                                    &process_data->ccdata,
                                    &process_data->prev_gpio_state));
 
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD, process_data->transaction.state);
     cut_assert_true(os_write_buffer.empty());
 
     /* send write command to DCPD */
