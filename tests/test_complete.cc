@@ -20,6 +20,7 @@
 #include <array>
 
 #include "dcpspi_process.h"
+#include "dcpdefs.h"
 #include "spi.h"
 
 #include "mock_messages.hh"
@@ -327,7 +328,11 @@ void test_single_slave_write_transaction()
     /* slave sends write command for UPnP friendly name */
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
-    std::array<uint8_t, 8> write_command { UINT8_MAX, 0x02, 0x58, 0x03, 0x00, 0x61, 0x62, 0x63 };
+    static const std::array<uint8_t, 8> write_command
+    {
+        UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
+        0x61, 0x62, 0x63
+    };
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, write_command);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_info_formatted(
