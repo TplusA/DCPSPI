@@ -172,11 +172,25 @@ static PollResult poll_result;
 static ProcessData *process_data;
 
 static std::vector<char> os_write_buffer;
+static std::vector<char> os_read_buffer;
 
 static ssize_t read_mock(int fd, void *dest, size_t count)
 {
-    cut_fail("read() called");
-    return -1;
+    cppcut_assert_equal(expected_fifo_in_fd, fd);
+    cppcut_assert_not_null(dest);
+    cppcut_assert_operator(size_t(0), <, count);
+
+    if(count > os_read_buffer.size())
+        count = os_read_buffer.size();
+
+    std::copy_n(os_read_buffer.begin(), count, static_cast<char *>(dest));
+
+    if(count < os_read_buffer.size())
+        os_read_buffer.erase(os_read_buffer.begin(), os_read_buffer.begin() + count);
+    else
+        os_read_buffer.clear();
+
+    return count;
 }
 
 static ssize_t write_mock(int fd, const void *buf, size_t count)
@@ -227,6 +241,7 @@ void cut_setup()
     mock_gpio_singleton = mock_gpio;
 
     os_write_buffer.clear();
+    os_read_buffer.clear();
 
     poll_result.reset();
 
@@ -253,6 +268,9 @@ void cut_teardown()
     cut_assert_true(os_write_buffer.empty());
     os_write_buffer.shrink_to_fit();
 
+    cut_assert_true(os_read_buffer.empty());
+    os_read_buffer.shrink_to_fit();
+
     mock_messages->check();
     mock_os->check();
     mock_spi_hw->check();
@@ -275,6 +293,16 @@ void cut_teardown()
 
     delete spi_rw_data;
     spi_rw_data = nullptr;
+}
+
+static void expect_wait_for_spi_slave(const struct timespec &t)
+{
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                       spi_rw_data_t::EXPECT_READ_ZEROS,
+                                                       true);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 }
 
 static void expect_no_more_actions()
@@ -378,6 +406,142 @@ void test_single_slave_write_transaction()
     cut_assert_equal_memory(&write_command.data()[1], write_command.size() - 1,
                             os_write_buffer.data(), os_write_buffer.size());
     os_write_buffer.clear();
+
+    /* the poll(2) event for the deassearted request line is still pending, but
+     * is handled only now (with no effect) */
+    poll_result.check();
+    poll_result.set_gpio_events(POLLPRI).set_return_value(1);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    /* done */
+    expect_no_more_actions();
+}
+
+/*!\test
+ * Show how a read transaction from the SPI slave travels through the system.
+ */
+void test_single_slave_read_transaction()
+{
+    static const struct timespec dummy_time = { .tv_sec = 0, .tv_nsec = 0, };
+
+    /* slave activates the request GPIO */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    poll_result.set_gpio_events(POLLPRI).set_return_value(1);
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
+    mock_gpio->check();
+
+    /* slave sends read command for device status register */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    static const std::array<uint8_t, 5> read_command
+    {
+        UINT8_MAX, DCP_COMMAND_READ_REGISTER, 0x11, 0x00, 0x00
+    };
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, read_command);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: command header from SPI: 0x01 0x11 0x00 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_SLAVE_READCMD_FORWARDING_TO_DCPD, process_data->transaction.state);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* send read command to DCPD */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave read transaction: send 4 bytes to DCPD");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD, process_data->transaction.state);
+    cut_assert_equal_memory(&read_command.data()[1], read_command.size() - 1,
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* DCPD sends the result back to us, header first */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_return_value(1);
+    static const std::array<uint8_t, 6> dcpd_answer
+    {
+        DCP_COMMAND_MULTI_READ_REGISTER, 0x11, 0x02, 0x00,
+        0x12, 0x34
+    };
+    std::copy_n(dcpd_answer.begin(), dcpd_answer.size(), std::back_inserter(os_read_buffer));
+    mock_messages->expect_msg_info_formatted(
+        "Slave read transaction: command header from DCPD: 0x03 0x11 0x02 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(size_t(2), os_read_buffer.size());
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* process data from DCPD remaining in pipe buffer */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_return_value(1);
+    mock_messages->expect_msg_info_formatted(
+        "Slave read transaction: expecting 2 bytes from DCPD");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_READCMD_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* send answer to SPI slave */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave read transaction: send 6 bytes over SPI");
+    expect_wait_for_spi_slave(dummy_time);
+    spi_rw_data->set(dcpd_answer);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
 
     /* the poll(2) event for the deassearted request line is still pending, but
      * is handled only now (with no effect) */
