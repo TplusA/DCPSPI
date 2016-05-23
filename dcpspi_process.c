@@ -42,6 +42,12 @@ static bool expecting_dcp_data(const struct dcp_transaction *transaction)
             transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD);
 }
 
+static bool expecting_gpio_change(const struct dcp_transaction *transaction)
+{
+    return (transaction->state == TR_IDLE ||
+            transaction->state == TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT);
+}
+
 static void clear_buffer(struct buffer *buffer)
 {
     buffer->pos = 0;
@@ -387,6 +393,8 @@ static void process_transaction(struct dcp_transaction *transaction,
 
                 swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
                 transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
+                transaction->request_state = REQ_ASSERTED;
+                transaction->spi_buffer.pos = 0;
                 leave_switch = true;
             }
             else
@@ -506,16 +514,18 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
         transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
+        transaction->request_state = REQ_NOT_REQUESTED;
     }
 }
 
-static void process_request_line(struct dcp_transaction *transaction,
+static bool process_request_line(struct dcp_transaction *transaction,
                                  struct buffer *deferred_transaction_data,
                                  int fifo_in_fd, int fifo_out_fd,
                                  int spi_fd, unsigned int spi_timeout_ms,
                                  struct collision_check_data *ccdata,
                                  bool *prev_gpio_state)
 {
+    bool slave_has_released_request_line = false;
     bool current_gpio_state = gpio_is_active(ccdata->gpio);
 
     if(current_gpio_state)
@@ -541,6 +551,7 @@ static void process_request_line(struct dcp_transaction *transaction,
         /* deassertion of request line signals that slave is ready for
          * next transaction after this one has been completed */
         transaction->request_state = REQ_DEASSERTED;
+        slave_has_released_request_line = true;
     }
     else if(transaction->request_state == REQ_DEASSERTED)
     {
@@ -550,6 +561,8 @@ static void process_request_line(struct dcp_transaction *transaction,
     }
 
     *prev_gpio_state = current_gpio_state;
+
+    return slave_has_released_request_line;
 }
 
 static bool wait_for_dcp_data(struct dcp_transaction *transaction,
@@ -585,9 +598,14 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
     }
 
     if(fds[0].revents & POLLPRI)
-        process_request_line(transaction, deferred_transaction_data,
-                             fifo_in_fd, fifo_out_fd,
-                             spi_fd, spi_timeout_ms, ccdata, prev_gpio_state);
+    {
+        if(process_request_line(transaction, deferred_transaction_data,
+                                fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, ccdata, prev_gpio_state))
+            process_transaction(transaction, deferred_transaction_data,
+                                fifo_in_fd, fifo_out_fd,
+                                spi_fd, spi_timeout_ms, ccdata);
+    }
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
         msg_error(0, LOG_WARNING,
@@ -636,7 +654,7 @@ bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
                              fifo_in_fd, fifo_out_fd,
                              spi_fd, spi_timeout_ms, ccdata, prev_gpio_state);
 
-    if(expecting_dcp_data(transaction))
+    if(expecting_dcp_data(transaction) || expecting_gpio_change(transaction))
         return wait_for_dcp_data(transaction, deferred_transaction_data,
                                  fifo_in_fd, fifo_out_fd,
                                  spi_fd, spi_timeout_ms,

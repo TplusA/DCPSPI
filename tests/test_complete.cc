@@ -623,4 +623,388 @@ void test_single_master_write_transaction()
     expect_no_more_actions();
 }
 
+/*!\test
+ * Collision: We tried to send something, but the slave tried as well.
+ *
+ * In this case, the slave transaction shall take priority over the master
+ * transaction. The master transaction shall be suspended so that the slave
+ * transaction can be processed. After the slave transaction has finished, the
+ * master transaction shall be restarted.
+ */
+void test_collision_when_starting_to_send_to_slave()
+{
+    /* DCPD sends something through its pipe */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_return_value(1);
+    static const std::array<uint8_t, 6> network_status
+    {
+        DCP_COMMAND_MULTI_READ_REGISTER, 0x32, 0x02, 0x00,
+        0x02, 0x01
+    };
+    std::copy_n(network_status.begin(), network_status.size(), std::back_inserter(os_read_buffer));
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: command header from DCPD: 0x03 0x32 0x02 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(size_t(2), os_read_buffer.size());
+    cppcut_assert_equal(size_t(4), process_data->transaction.dcp_buffer.pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* SPI slave interrupts with a write command, DCPD's data still resides in
+     * the pipe buffer and is processed before the collision is detected so
+     * that the full transaction is there before going any further */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_gpio_events(POLLPRI).set_return_value(2);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: expecting 2 bytes from DCPD");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(size_t(0), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_NOT_REQUESTED, process_data->transaction.request_state);
+    cppcut_assert_equal(network_status.size(), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* try sending command to SPI slave, but collision is detected and the
+     * current master transaction get temporarily replace by a slave
+     * transaction */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: send 6 bytes over SPI");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "Collision detected (interrupted by slave)");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(network_status.size(), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_ASSERTED, process_data->transaction.request_state);
+    cppcut_assert_equal(size_t(0), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* switch over to slave transaction: slave sends write command for UPnP
+     * friendly name */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    static const std::array<uint8_t, 8> write_command
+    {
+        UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
+        0x61, 0x62, 0x63
+    };
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, write_command);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE, process_data->transaction.state);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* slave transaction: process the rest of the SPI input buffer */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave write transaction: expecting 3 bytes from slave");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD, process_data->transaction.state);
+    cut_assert_true(os_write_buffer.empty());
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* slave transaction: send write command to DCPD */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave write transaction: send 7 bytes to DCPD");
+    mock_messages->expect_msg_info(
+        "Continue processing deferred master transaction");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(size_t(0), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_NOT_REQUESTED, process_data->transaction.request_state);
+    cppcut_assert_equal(network_status.size(), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    cut_assert_equal_memory(&write_command.data()[1], write_command.size() - 1,
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* nice, now continue with the master transaction: send command to SPI
+     * slave */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: send 6 bytes over SPI");
+    expect_wait_for_spi_slave(dummy_time);
+    spi_rw_data->set(network_status);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    /* the poll(2) event for the deassearted request line is still pending, but
+     * is handled only now (with no effect) */
+    poll_result.check();
+    poll_result.set_gpio_events(POLLPRI).set_return_value(1);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    /* done */
+    expect_no_more_actions();
+}
+
+/*!\test
+ * Collision: We tried to send something, slave tries as well and asserts the
+ * request line for a long time.
+ */
+void test_collision_slave_holds_request_line_until_after_end_of_transaction()
+{
+    /* DCPD sends something through its pipe */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_return_value(1);
+    static const std::array<uint8_t, 6> network_status
+    {
+        DCP_COMMAND_MULTI_READ_REGISTER, 0x32, 0x02, 0x00,
+        0x02, 0x01
+    };
+    std::copy_n(network_status.begin(), network_status.size(), std::back_inserter(os_read_buffer));
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: command header from DCPD: 0x03 0x32 0x02 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(size_t(2), os_read_buffer.size());
+    cppcut_assert_equal(size_t(4), process_data->transaction.dcp_buffer.pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* SPI slave interrupts with a write command, DCPD's data still resides in
+     * the pipe buffer and is processed before the collision is detected so
+     * that the full transaction is there before going any further */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    poll_result.set_dcpd_events(POLLIN).set_gpio_events(POLLPRI).set_return_value(2);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: expecting 2 bytes from DCPD");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(size_t(0), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_NOT_REQUESTED, process_data->transaction.request_state);
+    cppcut_assert_equal(network_status.size(), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* try sending command to SPI slave, but collision is detected and the
+     * current master transaction get temporarily replace by a slave
+     * transaction */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: send 6 bytes over SPI");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+                                              "Collision detected (interrupted by slave)");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(network_status.size(), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_ASSERTED, process_data->transaction.request_state);
+    cppcut_assert_equal(size_t(0), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* switch over to slave transaction: slave sends write command for UPnP
+     * friendly name */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    static const std::array<uint8_t, 8> write_command
+    {
+        UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
+        0x61, 0x62, 0x63
+    };
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, write_command);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE, process_data->transaction.state);
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* slave transaction: process the rest of the SPI input buffer */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave write transaction: expecting 3 bytes from slave");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+    cppcut_assert_equal(TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD, process_data->transaction.state);
+    cut_assert_true(os_write_buffer.empty());
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* slave transaction: send write command to DCPD */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Slave write transaction: send 7 bytes to DCPD");
+    mock_messages->expect_msg_info_formatted(
+        "End of transaction, waiting for slave to release request line");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(network_status.size(), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT, process_data->transaction.state);
+    cppcut_assert_equal(REQ_ASSERTED, process_data->transaction.request_state);
+    cppcut_assert_equal(write_command.size() - 1U, process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(write_command.size() - 1U, process_data->transaction.flush_to_dcpd_buffer_pos);
+    cut_assert_equal_memory(&write_command.data()[1], write_command.size() - 1,
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* waiting for slave to release the GPIO */
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    poll_result.set_gpio_events(POLLPRI).set_return_value(1);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info(
+        "Continue processing deferred master transaction");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    cppcut_assert_equal(size_t(0), process_data->deferred_transaction_data.pos);
+    cppcut_assert_equal(TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQ_NOT_REQUESTED, process_data->transaction.request_state);
+    cppcut_assert_equal(network_status.size(), process_data->transaction.dcp_buffer.pos);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    cut_assert_true(os_write_buffer.empty());
+    mock_messages->check();
+    mock_gpio->check();
+
+    /* nice, now continue with the master transaction: send command to SPI
+     * slave */
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Master write transaction: send 6 bytes over SPI");
+    expect_wait_for_spi_slave(dummy_time);
+    spi_rw_data->set(network_status);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
+
+    /* done */
+    expect_no_more_actions();
+}
+
 }
