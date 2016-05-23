@@ -354,6 +354,21 @@ void test_single_slave_write_transaction()
 
     cut_assert_equal_memory(&write_command.data()[1], write_command.size() - 1,
                             os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+
+    /* the poll(2) event for the deassearted request line is still pending, but
+     * is handled only now (with no effect) */
+    poll_result.check();
+    poll_result.set_gpio_events(POLLPRI).set_return_value(1);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, expected_gpio_fd, true,
+                                   &process_data->transaction,
+                                   &process_data->deferred_transaction_data,
+                                   &process_data->ccdata,
+                                   &process_data->prev_gpio_state));
 
     /* done */
     expect_no_more_actions();
