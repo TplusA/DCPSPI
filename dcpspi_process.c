@@ -627,8 +627,7 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
                                 fifo_in_fd, fifo_out_fd,
                                 spi_fd, spi_timeout_ms, ccdata);
         else
-            /* FIXME: the DCP process needs to know about this */
-            msg_info("collision: DCP tries to send command in the middle of a transaction");
+            BUG("DCP tries to send command in the middle of a transaction");
     }
 
     if(fds[1].revents & ~POLLIN)
