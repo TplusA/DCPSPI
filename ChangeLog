@@ -1,3 +1,9 @@
+2016-05-23  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 1.11 released.
+
+	* Protocol: Fix collision handling.
+
 2016-03-04  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.10 released.
