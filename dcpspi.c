@@ -140,11 +140,13 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 
     reset_transaction_struct(&transaction);
 
-    const int gpio_fd = gpio != NULL ? gpio_get_poll_fd(gpio) : -1;
-    bool prev_gpio_state = gpio != NULL ? gpio_is_active(gpio) : false;
+    const bool is_running_for_real = (gpio != NULL);
+    const int gpio_fd = is_running_for_real ? gpio_get_poll_fd(gpio) : -1;
+    bool prev_gpio_state = is_running_for_real ? gpio_is_active(gpio) : false;
 
     while(keep_running &&
-          dcpspi_process(fifo_in_fd, fifo_out_fd, spi_fd, gpio_fd, true,
+          dcpspi_process(fifo_in_fd, fifo_out_fd, spi_fd, gpio_fd,
+                         is_running_for_real,
                          &transaction, &deferred_transaction_data, &ccdata,
                          &prev_gpio_state))
         ;
