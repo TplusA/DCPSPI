@@ -145,6 +145,11 @@ static void ensure_empty_read_buffer()
 
 /*!\test
  * Regular happy case: just read some data from SPI slave, no escape character.
+ *
+ * There is no protocol parsing done at this point. This is pure copying of
+ * bytes (modulo special handling of NOP and escape bytes, added only to take
+ * care of the characteristics of the physical layer, just like the request
+ * GPIO) and juggling with buffers.
  */
 void test_read_from_spi()
 {
