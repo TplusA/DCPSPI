@@ -124,9 +124,9 @@ class ProcessData
     ProcessData &operator=(const ProcessData &) = delete;
 
     explicit ProcessData(int gpio_fd,
-                         uint8_t (&dcp_buffer)[260],
-                         uint8_t (&deferred_dcp_buffer)[260],
-                         uint8_t (&spi_buffer)[260 * 2]):
+                         uint8_t (&dcp_buffer)[DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE],
+                         uint8_t (&deferred_dcp_buffer)[DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE],
+                         uint8_t (&spi_buffer)[(DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE) * 2]):
         gpio(nullptr),
         prev_gpio_state(false)
     {
@@ -247,8 +247,8 @@ void cut_setup()
 
     poll_result.reset();
 
-    static uint8_t dcp_double_buffer[2][260];
-    static uint8_t spi_backing_buffer[260 * 2];
+    static uint8_t dcp_double_buffer[2][DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE];
+    static uint8_t spi_backing_buffer[(DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE) * 2];
 
     process_data = new ProcessData(expected_gpio_fd, dcp_double_buffer[0],
                                    dcp_double_buffer[1], spi_backing_buffer);

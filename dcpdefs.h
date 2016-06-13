@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -19,7 +19,8 @@
 #ifndef DCPDEFS_H
 #define DCPDEFS_H
 
-#define DCP_HEADER_SIZE 4
+#define DCP_HEADER_SIZE                  4
+#define DCP_PAYLOAD_MAXSIZE              256
 
 #define DCP_COMMAND_WRITE_REGISTER       0
 #define DCP_COMMAND_READ_REGISTER        1

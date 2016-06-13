@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -28,6 +28,7 @@
 #include <errno.h>
 
 #include "dcpspi_process.h"
+#include "dcpdefs.h"
 #include "spi.h"
 #include "named_pipe.h"
 #include "gpio.h"
@@ -110,8 +111,8 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 {
     msg_info("Accepting traffic");
 
-    static uint8_t dcp_double_buffer[2][260];
-    static uint8_t spi_backing_buffer[260 * 2];
+    static uint8_t dcp_double_buffer[2][DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE];
+    static uint8_t spi_backing_buffer[(DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE) * 2];
 
     struct dcp_transaction transaction =
     {
