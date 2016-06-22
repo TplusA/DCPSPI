@@ -150,7 +150,6 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
 static enum SpiSendResult
 wait_for_spi_slave(int fd, unsigned int timeout_ms,
                    uint8_t *const buffer, const size_t buffer_size,
-                   bool (*is_slave_interrupting)(void *data), void *user_data,
                    bool *have_significant_data)
 {
     const struct spi_ioc_transfer spi_transfer[] =
@@ -171,14 +170,6 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
     while(1)
     {
-        if(is_slave_interrupting(user_data))
-        {
-            /* collision: while we were preparing to send something to the slave,
-             * it asserted the request line in order to send something to us */
-            msg_error(0, LOG_NOTICE, "Collision detected (interrupted by slave)");
-            return SPI_SEND_RESULT_COLLISION;
-        }
-
         int ret =
             spi_hw_do_transfer(fd, spi_transfer,
                                sizeof(spi_transfer) / sizeof(spi_transfer[0]));
@@ -248,9 +239,7 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
 static struct spi_input_buffer global_spi_input_buffer;
 
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms,
-                                   bool (*is_slave_interrupting)(void *data),
-                                   void *user_data)
+                                   unsigned int timeout_ms)
 {
     if(fd < 0)
     {
@@ -263,7 +252,6 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     const enum SpiSendResult wait_result =
         wait_for_spi_slave(fd, timeout_ms,
                            poll_bytes_buffer, sizeof(poll_bytes_buffer),
-                           is_slave_interrupting, user_data,
                            &have_significant_data);
 
     if(wait_result != SPI_SEND_RESULT_OK)

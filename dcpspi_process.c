@@ -264,13 +264,6 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     }
 }
 
-static bool check_slave_request_collision(void *data)
-{
-    const struct collision_check_data *const check_data = data;
-
-    return gpio_is_active(check_data->gpio);
-}
-
 static void process_transaction(struct dcp_transaction *transaction,
                                 struct buffer *deferred_transaction_data,
                                 int fifo_in_fd, int fifo_out_fd,
@@ -367,8 +360,7 @@ static void process_transaction(struct dcp_transaction *transaction,
 
         const enum SpiSendResult ret =
             spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                            transaction->spi_buffer.pos, spi_timeout_ms,
-                            check_slave_request_collision, ccdata);
+                            transaction->spi_buffer.pos, spi_timeout_ms);
         bool leave_switch = false;
 
         switch(ret)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -69,16 +69,6 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *     The maximum amount of time to wait for the slave to get ready in
  *     milliseconds.
  *
- * \param is_slave_interrupting
- *     After each check for slave ready state, this function is called to check
- *     if the slave has asserted the request line. If it has, then there is a
- *     collision and sending the buffer is aborted. We are doing this through a
- *     callback function for decoupling SPI from GPIO and possibly more state
- *     checks to come.
- *
- * \param user_data
- *     Pointer to opaque data passed to \p is_slave_interrupting().
- *
  * \retval #SPI_SEND_RESULT_OK         On success.
  * \retval #SPI_SEND_RESULT_FAILURE    On unrecoverable, hard error.
  * \retval #SPI_SEND_RESULT_TIMEOUT    On timeout.
@@ -86,9 +76,7 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *                                     transaction).
  */
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms,
-                                   bool (*is_slave_interrupting)(void *data),
-                                   void *user_data);
+                                   unsigned int timeout_ms);
 
 /*!
  * Fill buffer from SPI, but remove 0xff NOP bytes.

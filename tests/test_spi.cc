@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -274,16 +274,6 @@ static void expect_spi_slave_gets_ready()
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 }
 
-static bool slave_does_not_interrupt(void *data)
-{
-    return false;
-}
-
-static bool slave_is_interrupting(void *data)
-{
-    return true;
-}
-
 /*!\test
  * Regular happy case: just write some data to SPI slave, no escape character.
  */
@@ -304,8 +294,7 @@ void test_write_to_spi()
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
-                                        expected_content.size(), 500,
-                                        slave_does_not_interrupt, NULL));
+                                        expected_content.size(), 500));
 }
 
 /*!\test
@@ -331,8 +320,7 @@ void test_write_escaped_data_to_spi()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
-                                        raw_data.size(), 500,
-                                        slave_does_not_interrupt, NULL));
+                                        raw_data.size(), 500));
 }
 
 /*!\test
@@ -736,8 +724,7 @@ void test_send_timeout_without_any_write_is_not_possible()
 
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000,
-                                        slave_does_not_interrupt, NULL));
+                                        buffer.data(), buffer.size(), 1000));
 }
 
 /*!\test
@@ -783,8 +770,7 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 100,
-                                        slave_does_not_interrupt, NULL));
+                                        buffer.data(), buffer.size(), 100));
 }
 
 /*!\test
@@ -833,58 +819,7 @@ void test_send_to_slave_may_fail_due_to_timeout()
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
                                         not_sent_data.data(),
-                                        not_sent_data.size(), 100,
-                                        slave_does_not_interrupt, NULL));
-}
-
-/*!\test
- * Collisions are detected when the slave device asserts the request line
- * during waiting for slave ready signal.
- *
- * The test only checks if detection is done the right way, provided that the
- * request line is correctly evaluated in the callback passed to
- * #spi_send_buffer(). Collision handling is done in the layer on top and
- * should be tested somewhere else.
- */
-void test_collision_detection_by_gpio()
-{
-    /* no polling takes place because the request line is asserted when the
-     * send attempt is being made */
-    static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
-                                              "Collision detected (interrupted by slave)");
-
-    std::array<uint8_t, 10> buffer;
-    buffer.fill(0x55);
-
-    cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
-                        spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000,
-                                        slave_is_interrupting, NULL));
-
-    /* the slave's data can be received */
-    std::array<uint8_t, 15> expected_data;
-    for(size_t i = 0; i < expected_data.size(); ++i)
-        expected_data[i] = i + DCP_ESCAPE_CHARACTER + 1;
-
-    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, expected_data);
-    expect_spi_transfers(expected_data.size());
-
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-
-    std::array<uint8_t, expected_data.size()> receive_buffer;
-
-    cppcut_assert_equal(ssize_t(receive_buffer.size()),
-                        spi_read_buffer(expected_spi_fd,
-                                        receive_buffer.data(),
-                                        receive_buffer.size(), 500));
-
-    cut_assert_equal_memory(expected_data.data(), expected_data.size(),
-                            receive_buffer.data(), receive_buffer.size());
-
-    ensure_empty_read_buffer();
+                                        not_sent_data.size(), 100));
 }
 
 /*!\test
@@ -915,7 +850,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -958,7 +893,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 5> second_fragment = { 0x66, 0x77, 0x88, 0xaa, 0xfe, };
@@ -1013,7 +948,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x33, 0x09, 0x1f, };
@@ -1068,7 +1003,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* slave sends more data to complete its command: the 0x01 is escaped */
     static const std::array<uint8_t, 4> second_fragment = { 0x01, 0x80, 0x71, 0xba, };
@@ -1125,7 +1060,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x01, 0x02, 0x03, };
@@ -1180,7 +1115,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -1222,7 +1157,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, slave_does_not_interrupt, NULL));
+                                        1000));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
