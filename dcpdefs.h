@@ -19,6 +19,14 @@
 #ifndef DCPDEFS_H
 #define DCPDEFS_H
 
+#define DCPSYNC_HEADER_SIZE              6
+#define DCPSYNC_SLAVE_SERIAL_INVALID     0x0000
+#define DCPSYNC_SLAVE_SERIAL_MIN         0x0001
+#define DCPSYNC_SLAVE_SERIAL_MAX         0x7fff
+#define DCPSYNC_MASTER_SERIAL_INVALID    0x8000
+#define DCPSYNC_MASTER_SERIAL_MIN        0x8001
+#define DCPSYNC_MASTER_SERIAL_MAX        0xffff
+
 #define DCP_HEADER_SIZE                  4
 #define DCP_PAYLOAD_MAXSIZE              256
 

@@ -111,15 +111,15 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
 {
     msg_info("Accepting traffic");
 
-    static uint8_t dcp_double_buffer[2][DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE];
+    static uint8_t dcp_backing_buffer[DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE];
     static uint8_t spi_backing_buffer[(DCP_HEADER_SIZE + DCP_PAYLOAD_MAXSIZE) * 2];
 
     struct dcp_transaction transaction =
     {
         .dcp_buffer =
         {
-            .buffer = dcp_double_buffer[0],
-            .size = sizeof(dcp_double_buffer[0]),
+            .buffer = dcp_backing_buffer,
+            .size = sizeof(dcp_backing_buffer),
         },
         .spi_buffer =
         {
@@ -128,28 +128,19 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
         },
     };
 
-    struct buffer deferred_transaction_data =
-    {
-        .buffer = dcp_double_buffer[1],
-        .size = sizeof(dcp_double_buffer[1]),
-    };
+    reset_transaction_struct(&transaction, true);
 
-    struct collision_check_data ccdata =
+    struct slave_request_and_lock_data rldata =
     {
         .gpio = gpio,
+        .gpio_fd = (gpio != NULL) ? gpio_get_poll_fd(gpio) : -1,
+        .is_running_for_real = (gpio != NULL),
+        .previous_gpio_state = (gpio != NULL) ? gpio_is_active(gpio) : false,
     };
 
-    reset_transaction_struct(&transaction);
-
-    const bool is_running_for_real = (gpio != NULL);
-    const int gpio_fd = is_running_for_real ? gpio_get_poll_fd(gpio) : -1;
-    bool prev_gpio_state = is_running_for_real ? gpio_is_active(gpio) : false;
-
     while(keep_running &&
-          dcpspi_process(fifo_in_fd, fifo_out_fd, spi_fd, gpio_fd,
-                         is_running_for_real,
-                         &transaction, &deferred_transaction_data, &ccdata,
-                         &prev_gpio_state))
+          dcpspi_process(fifo_in_fd, fifo_out_fd, spi_fd,
+                         &transaction, &rldata))
         ;
 }
 

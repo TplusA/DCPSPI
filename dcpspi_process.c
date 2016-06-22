@@ -31,35 +31,75 @@
 #include "os.h"
 
 /*!
+ * What has happened on the request pin since we've checked last.
+ *
+ * The result #REQUEST_LINE_DEASSERTED_AND_ASSERTED or
+ * #REQUEST_LINE_ASSERTED_AND_DEASSERTED is returned in case we were to slow to
+ * see the individual GPIO changes. Still, poll(2) will report the changes,
+ * albeit as a single event, as the low-level driver has seen and reported the
+ * changes.
+ *
+ * It is well possible that there were more changes of GPIO state that
+ * indicated by the result codes, but we will never be able to figure this out.
+ * For instance, #REQUEST_LINE_ASSERTED may be reported in case the state
+ * changed from low to high, then to low, and then to high again, but if these
+ * changes came in too fast for the system to recognize/process, these
+ * information will be lost.
+ */
+enum RequestLineChanges
+{
+    REQUEST_LINE_ASSERTED,
+    REQUEST_LINE_DEASSERTED,
+
+    REQUEST_LINE_DEASSERTED_AND_ASSERTED,
+    REQUEST_LINE_ASSERTED_AND_DEASSERTED,
+};
+
+#define EVENT_FD_COUNT 2
+
+static struct
+{
+    uint16_t next_dcpsync_serial;
+}
+dcpspi_globals;
+
+static uint16_t mk_serial(void)
+{
+    if(dcpspi_globals.next_dcpsync_serial < DCPSYNC_SLAVE_SERIAL_MIN ||
+       dcpspi_globals.next_dcpsync_serial > DCPSYNC_SLAVE_SERIAL_MAX)
+    {
+        dcpspi_globals.next_dcpsync_serial = DCPSYNC_SLAVE_SERIAL_MIN;
+    }
+
+    return dcpspi_globals.next_dcpsync_serial++;
+}
+
+void dcpspi_init(void)
+{
+    dcpspi_globals.next_dcpsync_serial = 0;
+}
+
+/*!
  * Whether or not the DCP process is allowed to send any data.
  */
 static bool expecting_dcp_data(const struct dcp_transaction *transaction)
 {
     return (transaction->state == TR_IDLE ||
-            transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD ||
-            transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD ||
-            transaction->state == TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD ||
-            transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD);
+            transaction->state == TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD ||
+            transaction->state == TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD ||
+            transaction->state == TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD);
 }
 
 static bool expecting_gpio_change(const struct dcp_transaction *transaction)
 {
     return (transaction->state == TR_IDLE ||
-            transaction->state == TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT);
+            (transaction->state == TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT &&
+             transaction->request_state == REQSTATE_LOCKED));
 }
 
 static void clear_buffer(struct buffer *buffer)
 {
     buffer->pos = 0;
-}
-
-static void swap_buffers(struct buffer *const first,
-                         struct buffer *const second)
-{
-    const struct buffer temp = *first;
-
-    *first = *second;
-    *second = temp;
 }
 
 static bool is_buffer_full(const struct buffer *buffer)
@@ -110,61 +150,94 @@ static ssize_t send_buffer_to_fd(struct buffer *buffer,
     return len < 0 ? -1 : 0;
 }
 
-void reset_transaction_struct(struct dcp_transaction *transaction)
+bool reset_transaction_struct(struct dcp_transaction *transaction,
+                              bool is_initial_reset)
 {
     transaction->state = TR_IDLE;
 
     clear_buffer(&transaction->dcp_buffer);
+    transaction->serial = 0;
     transaction->pending_size_of_transaction = 0;
     transaction->flush_to_dcpd_buffer_pos = 0;
 
     clear_buffer(&transaction->spi_buffer);
 
-    transaction->request_state = REQ_NOT_REQUESTED;
+    if(is_initial_reset)
+    {
+        transaction->request_state = REQSTATE_IDLE;
+        return false;
+    }
+
+    switch(transaction->request_state)
+    {
+      case REQSTATE_IDLE:
+      case REQSTATE_RELEASED:
+      case REQSTATE_MISSED:
+        transaction->request_state = REQSTATE_IDLE;
+        break;
+
+      case REQSTATE_LOCKED:
+        BUG("Reset locked transaction, chaos expected");
+        return true;
+
+      case REQSTATE_NEXT_PENDING:
+        msg_info("Processing pending slave transaction");
+        transaction->request_state = REQSTATE_LOCKED;
+        return true;
+    }
+
+    return false;
 }
 
-static void reset_transaction(struct dcp_transaction *transaction)
+static void reuse_transaction_for_collision(struct dcp_transaction *transaction)
+{
+    transaction->state = TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE;
+
+    transaction->serial = 0;
+    transaction->spi_buffer.pos = 0;
+}
+
+static bool reset_transaction(struct dcp_transaction *transaction)
 {
     switch(transaction->state)
     {
       case TR_IDLE:
-      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
-      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
+      case TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD:
+      case TR_MASTER_COMMAND_FORWARDING_TO_SLAVE:
+      case TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD:
+      case TR_MASTER_COMMAND_SKIPPED:
         break;
 
-      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
-      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
-      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
-      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
-      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
-      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
-        if(transaction->request_state == REQ_ASSERTED)
+      case TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE:
+      case TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE:
+      case TR_SLAVE_COMMAND_FORWARDING_TO_DCPD:
+      case TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT:
+        if(transaction->request_state == REQSTATE_LOCKED)
         {
-            msg_info("End of transaction, waiting for slave to release request line");
-            transaction->state = TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT;
-            return;
+            msg_info("About to end transaction 0x%04x in state %d, "
+                     "waiting for slave to release request line",
+                     transaction->serial, transaction->state);
+            transaction->state = TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT;
+
+            return false;
         }
+        else
+            msg_info("End of transaction 0x%04x in state %d, %s",
+                     transaction->serial, transaction->state,
+                     (transaction->request_state != REQSTATE_NEXT_PENDING
+                      ? "return to idle state"
+                      : "slave request pending"));
 
         break;
     }
 
-    reset_transaction_struct(transaction);
+    return reset_transaction_struct(transaction, false);
 }
 
 static uint8_t get_dcp_command_type(uint8_t dcp_header_first_byte)
 {
     return dcp_header_first_byte & 0x0f;
-}
-
-static bool is_read_command(const uint8_t *dcp_header)
-{
-    const uint8_t command_type = get_dcp_command_type(dcp_header[0]);
-
-    return (command_type == DCP_COMMAND_READ_REGISTER ||
-            command_type == DCP_COMMAND_MULTI_READ_REGISTER);
 }
 
 static uint16_t get_dcp_data_size(const uint8_t *dcp_header)
@@ -189,6 +262,67 @@ static size_t compute_read_size(const struct dcp_transaction *transaction)
     return read_size;
 }
 
+static void fill_dcpsync_header_generic(uint8_t *const dcpsync_header,
+                                        const uint8_t command,
+                                        const uint8_t ttl,
+                                        const uint16_t serial,
+                                        const uint16_t dcp_packet_size)
+{
+    dcpsync_header[0] = command;
+    dcpsync_header[1] = ttl;
+    dcpsync_header[2] = (serial >> 8) & UINT8_MAX;
+    dcpsync_header[3] = (serial >> 0) & UINT8_MAX;
+    dcpsync_header[4] = (dcp_packet_size >> 8) & UINT8_MAX;
+    dcpsync_header[5] = (dcp_packet_size >> 0) & UINT8_MAX;
+}
+
+static void fill_dcpsync_header_for_slave(uint8_t *dcpsync_header,
+                                          uint16_t serial,
+                                          uint16_t dcp_packet_size)
+{
+    fill_dcpsync_header_generic(dcpsync_header, 'c', 0, serial, dcp_packet_size);
+}
+
+static void send_packet_accepted_message(struct buffer *buffer,
+                                         uint16_t serial, int fd)
+{
+    fill_dcpsync_header_generic(buffer->buffer, 'a', 0, serial, 0);
+    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
+}
+
+static void send_packet_rejected_message(struct buffer *buffer,
+                                         uint16_t serial, uint8_t ttl, int fd)
+{
+    fill_dcpsync_header_generic(buffer->buffer, 'n', ttl, serial, 0);
+    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
+}
+
+static void send_packet_dropped_message(struct buffer *buffer,
+                                        uint16_t serial, int fd)
+{
+    send_packet_rejected_message(buffer, serial, 0, fd);
+}
+
+static inline uint8_t get_dcpsync_command(const uint8_t *dcpsync_header)
+{
+    return dcpsync_header[0];
+}
+
+static inline uint8_t get_dcpsync_ttl(const uint8_t *dcpsync_header)
+{
+    return dcpsync_header[1];
+}
+
+static inline uint16_t get_dcpsync_serial(const uint8_t *dcpsync_header)
+{
+    return (dcpsync_header[2] << 8) | dcpsync_header[3];
+}
+
+static inline uint16_t get_dcpsync_data_size(const uint8_t *dcpsync_header)
+{
+    return (dcpsync_header[4] << 8) | dcpsync_header[5];
+}
+
 static const char *tr_log_prefix(enum transaction_state state)
 {
     switch(state)
@@ -196,35 +330,30 @@ static const char *tr_log_prefix(enum transaction_state state)
       case TR_IDLE:
         return "No transaction";
 
-      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
-      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
-        return "Master write transaction";
+      case TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD:
+      case TR_MASTER_COMMAND_FORWARDING_TO_SLAVE:
+      case TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD:
+      case TR_MASTER_COMMAND_SKIPPED:
+        return "Master transaction";
 
-      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
+      case TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE:
+      case TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE:
+      case TR_SLAVE_COMMAND_FORWARDING_TO_DCPD:
+      case TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT:
         return "Slave transaction";
-
-      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
-      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
-        return "Slave write transaction";
-
-      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
-      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
-      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
-        return "Slave read transaction";
     }
 
     return "INVALID transaction";
 }
 
-static void process_transaction_receive_data(struct dcp_transaction *transaction,
+static bool process_transaction_receive_data(struct dcp_transaction *transaction,
+                                             struct slave_request_and_lock_data *rldata,
                                              int fifo_in_fd, int spi_fd,
                                              unsigned int spi_timeout_ms)
 {
     const char *read_peer =
-        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
+        (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
 
     msg_info("%s: expecting %u bytes from %s",
              tr_log_prefix(transaction->state),
@@ -232,7 +361,7 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
 
     const size_t read_size = compute_read_size(transaction);
     const int bytes_read =
-        (transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
+        (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
         ? spi_read_buffer(spi_fd,
                           transaction->dcp_buffer.buffer + transaction->dcp_buffer.pos,
                           read_size, spi_timeout_ms)
@@ -242,11 +371,10 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
     {
         msg_error(0, LOG_ERR, "%s: communication with %s broken",
                   tr_log_prefix(transaction->state), read_peer);
-        reset_transaction(transaction);
-        return;
+        return reset_transaction(transaction);
     }
 
-    if(transaction->state == TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE)
+    if(transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
         transaction->dcp_buffer.pos += bytes_read;
 
     transaction->pending_size_of_transaction -= (size_t)bytes_read;
@@ -255,56 +383,82 @@ static void process_transaction_receive_data(struct dcp_transaction *transaction
        is_buffer_full(&transaction->dcp_buffer))
     {
         transaction->flush_to_dcpd_buffer_pos = 0;
-        if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD)
-            transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
-        else if(transaction->state == TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD)
-            transaction->state = TR_SLAVE_READCMD_FORWARDING_TO_SLAVE;
+        if(transaction->state == TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD)
+            transaction->state = TR_MASTER_COMMAND_FORWARDING_TO_SLAVE;
+        else if(transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
+            transaction->state = TR_SLAVE_COMMAND_FORWARDING_TO_DCPD;
         else
-            transaction->state = TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD;
+        {
+            /* ignore packet with data, take next packet from DCPD */
+            clear_buffer(&transaction->dcp_buffer);
+            transaction->state = TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD;
+        }
     }
+
+    return false;
 }
 
-static void process_transaction(struct dcp_transaction *transaction,
-                                struct buffer *deferred_transaction_data,
-                                int fifo_in_fd, int fifo_out_fd,
-                                int spi_fd, unsigned int spi_timeout_ms,
-                                struct collision_check_data *ccdata)
+static void reject_or_drop(struct dcp_transaction *transaction,
+                           int fifo_out_fd)
 {
+    if(transaction->ttl > 0)
+    {
+        --transaction->ttl;
+
+        send_packet_rejected_message(&transaction->dcp_buffer,
+                                     transaction->serial, transaction->ttl,
+                                     fifo_out_fd);
+    }
+    else
+        msg_info("Silently dropping 0x%04x", transaction->serial);
+}
+
+static bool do_process_transaction(struct dcp_transaction *transaction,
+                                   struct slave_request_and_lock_data *rldata,
+                                   int fifo_in_fd, int fifo_out_fd,
+                                   int spi_fd, unsigned int spi_timeout_ms)
+{
+    bool retval = false;
+
     switch(transaction->state)
     {
       case TR_IDLE:
         switch(transaction->request_state)
         {
-          case REQ_NOT_REQUESTED:
-            transaction->state = TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD;
+          case REQSTATE_IDLE:
+            transaction->state = TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD;
             break;
 
-          case REQ_ASSERTED:
-            transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
+          case REQSTATE_LOCKED:
+            transaction->state = TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE;
             spi_new_transaction();
-            return;
+            return false;
 
-          case REQ_DEASSERTED:
+          case REQSTATE_RELEASED:
             msg_info("No transaction to process");
-            reset_transaction_struct(transaction);
-            return;
+            return reset_transaction(transaction);
+
+          case REQSTATE_NEXT_PENDING:
+          case REQSTATE_MISSED:
+            BUG("Invalid request state %d for idle transaction",
+                transaction->request_state);
+            return false;
         }
 
         /* fall-through */
 
-      case TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD:
-      case TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD:
+      case TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD:
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
-                               DCP_HEADER_SIZE - transaction->dcp_buffer.pos,
+                               (DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE) - transaction->dcp_buffer.pos,
                                fifo_in_fd) < 0)
         {
             msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
                       tr_log_prefix(transaction->state));
-            reset_transaction(transaction);
+            retval = reset_transaction(transaction);
             break;
         }
 
-        if(transaction->dcp_buffer.pos != DCP_HEADER_SIZE)
+        if(transaction->dcp_buffer.pos != DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE)
         {
             msg_info("%s: header from DCPD incomplete, waiting for more input",
                      tr_log_prefix(transaction->state));
@@ -314,155 +468,178 @@ static void process_transaction(struct dcp_transaction *transaction,
         /*
          * Possibly received a DCP header. Note that we explictly do not
          * validate the header content here because this is going to be done by
-         * the receiver of the data. We simply assume that we have a header
-         * here and that the length can be determined.
+         * the receiver of the data. We rely on the DCPSYNC header instead.
          */
         msg_info("%s: command header from DCPD: 0x%02x 0x%02x 0x%02x 0x%02x",
                  tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.buffer[0],
-                 transaction->dcp_buffer.buffer[1],
-                 transaction->dcp_buffer.buffer[2],
-                 transaction->dcp_buffer.buffer[3]);
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
 
+        transaction->ttl = get_dcpsync_ttl(transaction->dcp_buffer.buffer);
+        transaction->serial = get_dcpsync_serial(transaction->dcp_buffer.buffer);
         transaction->pending_size_of_transaction =
-            get_dcp_data_size(transaction->dcp_buffer.buffer);
+            get_dcpsync_data_size(transaction->dcp_buffer.buffer) - DCP_HEADER_SIZE;
 
-        if(transaction->pending_size_of_transaction > 0)
+        /* cap the number of retries */
+        if(transaction->ttl > 10)
+            transaction->ttl = 10;
+
+        if(get_dcpsync_command(transaction->dcp_buffer.buffer) == 'c')
         {
-            if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD)
-                transaction->state = TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD;
+            if(transaction->pending_size_of_transaction > 0)
+            {
+                transaction->state = TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD;
+                break;
+            }
             else
-                transaction->state = TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD;
+                transaction->state = TR_MASTER_COMMAND_FORWARDING_TO_SLAVE;
+        }
+        else
+        {
+            BUG("Unexpected DCPSYNC command 0x%02x for packet serial 0x%04x "
+                "with ttl %u, skipping %u bytes",
+                get_dcpsync_command(transaction->dcp_buffer.buffer),
+                transaction->serial, transaction->ttl,
+                transaction->pending_size_of_transaction);
+
+            if(transaction->pending_size_of_transaction > 0)
+                transaction->state = TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD;
+            else
+                transaction->state = TR_MASTER_COMMAND_SKIPPED;
+
             break;
         }
-
-        if(transaction->state == TR_MASTER_WRITECMD_RECEIVING_HEADER_FROM_DCPD)
-            transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
-        else
-            transaction->state = TR_SLAVE_READCMD_FORWARDING_TO_SLAVE;
 
         /* fall-through */
 
-      case TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE:
-      case TR_SLAVE_READCMD_FORWARDING_TO_SLAVE:
+      case TR_MASTER_COMMAND_FORWARDING_TO_SLAVE:
         log_assert(transaction->pending_size_of_transaction == 0);
 
         clear_buffer(&transaction->spi_buffer);
-        transaction->spi_buffer.pos =
-            spi_fill_buffer_from_raw_data(transaction->spi_buffer.buffer,
-                                          transaction->spi_buffer.size,
-                                          transaction->dcp_buffer.buffer,
-                                          transaction->dcp_buffer.pos);
 
-        msg_info("%s: send %zu bytes over SPI",
-                 tr_log_prefix(transaction->state),
-                 transaction->spi_buffer.pos);
+        const bool is_dummy_header =
+            transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE] == UINT8_MAX;
 
-        const enum SpiSendResult ret =
-            spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                            transaction->spi_buffer.pos, spi_timeout_ms);
-        bool leave_switch = false;
+        if(!is_dummy_header)
+        {
+            transaction->spi_buffer.pos =
+                spi_fill_buffer_from_raw_data(transaction->spi_buffer.buffer,
+                                              transaction->spi_buffer.size,
+                                              transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE,
+                                              transaction->dcp_buffer.pos - DCPSYNC_HEADER_SIZE);
 
+            msg_info("%s: send %zu bytes over SPI",
+                     tr_log_prefix(transaction->state),
+                     transaction->spi_buffer.pos);
+        }
+
+        const enum SpiSendResult ret = is_dummy_header
+            ? SPI_SEND_RESULT_OK
+            : spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
+                              transaction->spi_buffer.pos, spi_timeout_ms);
         switch(ret)
         {
           case SPI_SEND_RESULT_OK:
+            send_packet_accepted_message(&transaction->dcp_buffer,
+                                         transaction->serial, fifo_out_fd);
+            retval = reset_transaction(transaction);
+
+            break;
+
+          case SPI_SEND_RESULT_FAILURE:
+            /* hard failure or timeout; abort transaction */
+            send_packet_dropped_message(&transaction->dcp_buffer,
+                                        transaction->serial, fifo_out_fd);
+            retval = reset_transaction(transaction);
+
             break;
 
           case SPI_SEND_RESULT_TIMEOUT:
-          case SPI_SEND_RESULT_FAILURE:
-            /* hard failure or timeout; abort transaction */
-            reset_transaction(transaction);
-            leave_switch = true;
+            reject_or_drop(transaction, fifo_out_fd);
+            retval = reset_transaction(transaction);
+
             break;
 
           case SPI_SEND_RESULT_COLLISION:
-            if(transaction->state == TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE)
-            {
-                /* collision; process slave request first, reschedule master
-                 * transaction when the slave request is done */
-                if(deferred_transaction_data->pos > 0)
-                    BUG("Lost deferred transaction");
-
-                swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
-                transaction->state = TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE;
-                transaction->request_state = REQ_ASSERTED;
-                transaction->spi_buffer.pos = 0;
-                leave_switch = true;
-            }
-            else
-            {
-                /* slave didn't wait long enough for our answer (or we were
-                 * just very slow due to an unlucky schedule in an overloaded
-                 * system); in this state, we already got the complete answer
-                 * to the ongoing transaction from DCPD, and we can throw it
-                 * away because the slave is not interested anymore */
-                msg_info("%s: slave interrupted active transaction with new "
-                         "request, dropping answer to previous request",
-                         tr_log_prefix(transaction->state));;
-            }
+            /* slave coincidentally interrupted our attempt to tell something,
+             * need to try again later */
+            reject_or_drop(transaction, fifo_out_fd);
+            reuse_transaction_for_collision(transaction);
 
             break;
         }
 
-        if(leave_switch)
-            break;
-
-        reset_transaction(transaction);
         break;
 
-      case TR_SLAVE_CMD_RECEIVING_HEADER_FROM_SLAVE:
-        if(spi_read_buffer(spi_fd, transaction->dcp_buffer.buffer,
+      case TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE:
+        if(spi_read_buffer(spi_fd,
+                           transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE,
                            DCP_HEADER_SIZE, spi_timeout_ms) < DCP_HEADER_SIZE)
         {
-            reset_transaction(transaction);
+            retval = reset_transaction(transaction);
             break;
         }
 
-        transaction->dcp_buffer.pos = DCP_HEADER_SIZE;
+        transaction->dcp_buffer.pos = DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE;
 
         msg_info("%s: command header from SPI: 0x%02x 0x%02x 0x%02x 0x%02x",
                  tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.buffer[0],
-                 transaction->dcp_buffer.buffer[1],
-                 transaction->dcp_buffer.buffer[2],
-                 transaction->dcp_buffer.buffer[3]);
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
+                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
 
-        transaction->pending_size_of_transaction =
-            get_dcp_data_size(transaction->dcp_buffer.buffer);
+        const uint16_t dcp_payload_size =
+            get_dcp_data_size(transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE);
 
-        if(transaction->pending_size_of_transaction >
-           (transaction->dcp_buffer.size - DCP_HEADER_SIZE))
+        if(dcp_payload_size > (transaction->dcp_buffer.size - DCP_HEADER_SIZE))
         {
             msg_error(EINVAL, LOG_ERR,
                       "%s: transaction size %u exceeds maximum size of %zu",
                       tr_log_prefix(transaction->state),
-                      transaction->pending_size_of_transaction,
+                      dcp_payload_size,
                       transaction->dcp_buffer.size - DCP_HEADER_SIZE);
-            reset_transaction(transaction);
+            retval = reset_transaction(transaction);
             break;
         }
 
-        if(transaction->pending_size_of_transaction > 0)
+        transaction->serial = mk_serial();
+
+        fill_dcpsync_header_for_slave(transaction->dcp_buffer.buffer,
+                                      transaction->serial,
+                                      DCP_HEADER_SIZE + dcp_payload_size);
+
+        if(dcp_payload_size> 0)
         {
-            transaction->state = TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE;
+            transaction->pending_size_of_transaction = dcp_payload_size;
+            transaction->state = TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE;
+        }
+        else
+        {
+            transaction->pending_size_of_transaction = transaction->dcp_buffer.pos;
+            transaction->state = TR_SLAVE_COMMAND_FORWARDING_TO_DCPD;
             break;
         }
 
-        transaction->pending_size_of_transaction = DCP_HEADER_SIZE;
-        transaction->state = (is_read_command(transaction->dcp_buffer.buffer)
-                              ? TR_SLAVE_READCMD_FORWARDING_TO_DCPD
-                              : TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD);
+        /* fall-through */
+
+      case TR_MASTER_COMMAND_RECEIVING_DATA_FROM_DCPD:
+      case TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD:
+      case TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE:
+        retval = process_transaction_receive_data(transaction, rldata,
+                                                  fifo_in_fd, spi_fd,
+                                                  spi_timeout_ms);
         break;
 
-      case TR_MASTER_WRITECMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_SLAVE_READCMD_RECEIVING_DATA_FROM_DCPD:
-      case TR_SLAVE_WRITECMD_RECEIVING_DATA_FROM_SLAVE:
-        process_transaction_receive_data(transaction, fifo_in_fd, spi_fd,
-                                         spi_timeout_ms);
+      case TR_MASTER_COMMAND_SKIPPED:
+        send_packet_dropped_message(&transaction->dcp_buffer,
+                                    transaction->serial, fifo_out_fd);
+        retval = reset_transaction(transaction);
         break;
 
-      case TR_SLAVE_READCMD_FORWARDING_TO_DCPD:
-      case TR_SLAVE_WRITECMD_FORWARDING_TO_DCPD:
+      case TR_SLAVE_COMMAND_FORWARDING_TO_DCPD:
         msg_info("%s: send %zu bytes to DCPD",
                  tr_log_prefix(transaction->state),
                  transaction->dcp_buffer.pos);
@@ -477,132 +654,236 @@ static void process_transaction(struct dcp_transaction *transaction,
         {
             msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
                       tr_log_prefix(transaction->state));
-            reset_transaction(transaction);
+            retval = reset_transaction(transaction);
             break;
         }
 
         transaction->flush_to_dcpd_buffer_pos += sent_bytes;
 
         if(transaction->flush_to_dcpd_buffer_pos >= transaction->dcp_buffer.pos)
-        {
-            if(transaction->state == TR_SLAVE_READCMD_FORWARDING_TO_DCPD)
-            {
-                clear_buffer(&transaction->dcp_buffer);
-                transaction->state = TR_SLAVE_READCMD_RECEIVING_HEADER_FROM_DCPD;
-            }
-            else
-                reset_transaction(transaction);
-        }
+            retval = reset_transaction(transaction);
+
         break;
 
-      case TR_SLAVE_WAIT_FOR_REQUEST_DEASSERT:
-        reset_transaction(transaction);
+      case TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT:
+        retval = reset_transaction(transaction);
         break;
     }
 
-    if(transaction->state == TR_IDLE && deferred_transaction_data->pos > 0)
-    {
-        msg_info("Continue processing deferred master transaction");
+    return retval;
+}
 
-        swap_buffers(deferred_transaction_data, &transaction->dcp_buffer);
-        transaction->state = TR_MASTER_WRITECMD_FORWARDING_TO_SLAVE;
-        transaction->request_state = REQ_NOT_REQUESTED;
-    }
+static inline void process_transaction(struct dcp_transaction *transaction,
+                                       struct slave_request_and_lock_data *rldata,
+                                       int fifo_in_fd, int fifo_out_fd,
+                                       int spi_fd, unsigned int spi_timeout_ms)
+{
+    while(do_process_transaction(transaction, rldata,
+                                 fifo_in_fd, fifo_out_fd,
+                                 spi_fd, spi_timeout_ms))
+        ;
+}
+
+static enum RequestLineChanges determine_gpio_changes(bool current_state,
+                                                      bool prev_state)
+{
+    if(current_state != prev_state)
+        return current_state ? REQUEST_LINE_ASSERTED : REQUEST_LINE_DEASSERTED;
+
+
+    return current_state
+        ? REQUEST_LINE_DEASSERTED_AND_ASSERTED
+        : REQUEST_LINE_ASSERTED_AND_DEASSERTED;
 }
 
 static bool process_request_line(struct dcp_transaction *transaction,
-                                 struct buffer *deferred_transaction_data,
+                                 struct slave_request_and_lock_data *rldata,
                                  int fifo_in_fd, int fifo_out_fd,
-                                 int spi_fd, unsigned int spi_timeout_ms,
-                                 struct collision_check_data *ccdata,
-                                 bool *prev_gpio_state)
+                                 int spi_fd, unsigned int spi_timeout_ms)
 {
-    bool slave_has_released_request_line = false;
-    bool current_gpio_state = gpio_is_active(ccdata->gpio);
+    bool need_more_processing = false;
+    bool current_gpio_state = gpio_is_active(rldata->gpio);
 
-    if(current_gpio_state)
+    enum RequestLineChanges changes =
+        determine_gpio_changes(current_gpio_state, rldata->previous_gpio_state);
+
+    rldata->previous_gpio_state = current_gpio_state;
+
+    bool processing = true;
+
+    while(processing)
     {
-        if(transaction->state == TR_IDLE)
+        switch(changes)
         {
-            log_assert(transaction->request_state == REQ_NOT_REQUESTED);
+          case REQUEST_LINE_ASSERTED:
+          case REQUEST_LINE_ASSERTED_AND_DEASSERTED:
+            switch(transaction->request_state)
+            {
+              case REQSTATE_IDLE:
+                transaction->request_state = REQSTATE_LOCKED;
 
-            /* assertion of request line starts slave transaction */
-            transaction->request_state = REQ_ASSERTED;
-            process_transaction(transaction, deferred_transaction_data,
-                                fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, ccdata);
+                if(transaction->state == TR_IDLE)
+                {
+                    /* assertion of request line starts slave transaction */
+                    process_transaction(transaction, rldata,
+                                        fifo_in_fd, fifo_out_fd,
+                                        spi_fd, spi_timeout_ms);
+                }
+                else
+                    msg_info("Transaction 0x%04x interrupted by slave request",
+                             transaction->serial);
+
+                break;
+
+              case REQSTATE_RELEASED:
+              case REQSTATE_MISSED:
+                transaction->request_state = REQSTATE_NEXT_PENDING;
+
+                msg_info("Pending slave request while processing transaction 0x%04x",
+                         transaction->serial);
+
+                break;
+
+              case REQSTATE_LOCKED:
+                transaction->request_state = REQSTATE_NEXT_PENDING;
+
+                BUG("Slave request while processing locked transaction 0x%04x",
+                    transaction->serial);
+
+                break;
+
+              case REQSTATE_NEXT_PENDING:
+                transaction->request_state = REQSTATE_MISSED;
+
+                BUG("Slave request while processing transaction 0x%04x with pending transaction",
+                    transaction->serial);
+
+                break;
+            }
+
+            if(changes == REQUEST_LINE_ASSERTED_AND_DEASSERTED)
+                changes = REQUEST_LINE_DEASSERTED;
+            else
+                processing = false;
+
+            break;
+
+          case REQUEST_LINE_DEASSERTED:
+          case REQUEST_LINE_DEASSERTED_AND_ASSERTED:
+            switch(transaction->request_state)
+            {
+              case REQSTATE_LOCKED:
+                /* deassertion of request line signals that slave is ready for
+                 * next transaction after this one has been completed */
+                transaction->request_state = REQSTATE_RELEASED;
+                need_more_processing = (changes == REQUEST_LINE_DEASSERTED);
+
+                break;
+
+              case REQSTATE_NEXT_PENDING:
+                /* slave requested a transaction, but then gave up */
+                transaction->request_state = REQSTATE_MISSED;
+
+                msg_error(0, LOG_WARNING,
+                          "Lost slave request while processing transaction 0x%04x",
+                          transaction->serial);
+
+                break;
+
+              case REQSTATE_IDLE:
+                BUG("Deasserted idle transaction 0x%04x", transaction->serial);
+
+                break;
+
+              case REQSTATE_RELEASED:
+                transaction->state = TR_IDLE;
+
+                BUG("Deasserted released transaction 0x%04x", transaction->serial);
+
+                break;
+
+              case REQSTATE_MISSED:
+                transaction->state = TR_IDLE;
+
+                BUG("Deasserted released transaction 0x%04x with lost transaction request(s)",
+                    transaction->serial);
+
+                break;
+            }
+
+            if(changes == REQUEST_LINE_DEASSERTED_AND_ASSERTED)
+                changes = REQUEST_LINE_ASSERTED;
+            else
+                processing = false;
+
+            break;
         }
-        else if(transaction->request_state == REQ_DEASSERTED &&
-                current_gpio_state != *prev_gpio_state)
-            msg_info("New slave request during ongoing transaction");
-    }
-    else if(transaction->request_state == REQ_ASSERTED)
-    {
-        log_assert(transaction->state != TR_IDLE);
-
-        /* deassertion of request line signals that slave is ready for
-         * next transaction after this one has been completed */
-        transaction->request_state = REQ_DEASSERTED;
-        slave_has_released_request_line = true;
-    }
-    else if(transaction->request_state == REQ_DEASSERTED)
-    {
-        log_assert(transaction->state != TR_IDLE);
-        if(current_gpio_state != *prev_gpio_state)
-            msg_info("Lost slave request during ongoing transaction");
     }
 
-    *prev_gpio_state = current_gpio_state;
-
-    return slave_has_released_request_line;
+    return need_more_processing;
 }
 
-static bool wait_for_dcp_data(struct dcp_transaction *transaction,
-                              struct buffer *deferred_transaction_data,
-                              const int fifo_in_fd, const int fifo_out_fd,
-                              const int spi_fd, unsigned int spi_timeout_ms,
-                              const int gpio_fd,
-                              struct collision_check_data *ccdata,
-                              bool *prev_gpio_state)
+static bool wait_for_events(const struct dcp_transaction *const transaction,
+                            const int gpio_fd, int fifo_in_fd,
+                            bool is_quick_check, struct pollfd *fds)
 {
-    struct pollfd fds[2] =
+    if(transaction->state == TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT)
     {
-        {
-            .fd = gpio_fd,
-            .events = POLLPRI | POLLERR,
-        },
-        {
-            .fd = fifo_in_fd,
-            .events = POLLIN,
-        },
-    };
+        msg_info("Ignoring data from DCPD until slave deasserts request pin");
+        fifo_in_fd = -1;
+    }
 
-    int ret = os_poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
+    if(gpio_fd < 0 && fifo_in_fd < 0)
+        BUG("No fds to wait for");
 
-    if(ret <= 0)
+    fds[0].fd = gpio_fd;
+    fds[0].events = POLLPRI | POLLERR;
+    fds[1].fd = fifo_in_fd;
+    fds[1].events = POLLIN;
+
+    const int ret = os_poll(fds, EVENT_FD_COUNT, is_quick_check ? 0 : -1);
+
+    if(ret > 0)
     {
-        if(ret == 0)
-            msg_error(errno, LOG_WARNING, "poll() unexpected timeout");
-        else if(errno != EINTR)
-            msg_error(errno, LOG_CRIT, "poll() failed");
 
         return true;
     }
 
+    if(ret == 0)
+    {
+        if(!is_quick_check)
+            msg_error(errno, LOG_WARNING, "poll() unexpected timeout");
+    }
+    else if(errno != EINTR)
+        msg_error(errno, LOG_CRIT, "poll() failed");
+
+    return false;
+}
+
+static bool wait_for_dcp_data(struct dcp_transaction *transaction,
+                              const int fifo_in_fd, const int fifo_out_fd,
+                              const int spi_fd, unsigned int spi_timeout_ms,
+                              struct slave_request_and_lock_data *rldata)
+{
+    struct pollfd fds[EVENT_FD_COUNT];
+
+    if(!wait_for_events(transaction, rldata->gpio_fd, fifo_in_fd, false, fds))
+        return true;
+
     if(fds[0].revents & POLLPRI)
     {
-        if(process_request_line(transaction, deferred_transaction_data,
+        if(process_request_line(transaction, rldata,
                                 fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, ccdata, prev_gpio_state))
-            process_transaction(transaction, deferred_transaction_data,
+                                spi_fd, spi_timeout_ms))
+            process_transaction(transaction, rldata,
                                 fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, ccdata);
+                                spi_fd, spi_timeout_ms);
     }
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
         msg_error(0, LOG_WARNING,
                   "Unexpected poll() events on gpio_fd %d: %04x",
-                  gpio_fd, fds[0].revents);
+                  fds[0].fd, fds[0].revents);
 
     bool keep_running = true;
 
@@ -615,11 +896,9 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
     if(fds[1].revents & POLLIN)
     {
         if(expecting_dcp_data(transaction))
-            process_transaction(transaction, deferred_transaction_data,
+            process_transaction(transaction, rldata,
                                 fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms, ccdata);
-        else
-            BUG("DCP tries to send command in the middle of a transaction");
+                                spi_fd, spi_timeout_ms);
     }
 
     if(fds[1].revents & ~POLLIN)
@@ -631,29 +910,33 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
 }
 
 bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
-                    const int spi_fd, const int gpio_fd,
-                    bool is_running_for_real,
+                    const int spi_fd,
                     struct dcp_transaction *const transaction,
-                    struct buffer *const deferred_transaction_data,
-                    struct collision_check_data *const ccdata,
-                    bool *prev_gpio_state)
+                    struct slave_request_and_lock_data *const rldata)
 {
     static const unsigned int spi_timeout_ms = 1000;
 
-    if(is_running_for_real)
-        process_request_line(transaction, deferred_transaction_data,
-                             fifo_in_fd, fifo_out_fd,
-                             spi_fd, spi_timeout_ms, ccdata, prev_gpio_state);
+    if(rldata->is_running_for_real)
+    {
+        struct pollfd fds[EVENT_FD_COUNT];
+
+        if(wait_for_events(transaction, rldata->gpio_fd, -1, true, fds) &&
+           (fds[0].revents & POLLPRI) != 0)
+        {
+            process_request_line(transaction, rldata,
+                                 fifo_in_fd, fifo_out_fd,
+                                 spi_fd, spi_timeout_ms);
+        }
+    }
 
     if(expecting_dcp_data(transaction) || expecting_gpio_change(transaction))
-        return wait_for_dcp_data(transaction, deferred_transaction_data,
+        return wait_for_dcp_data(transaction,
                                  fifo_in_fd, fifo_out_fd,
-                                 spi_fd, spi_timeout_ms,
-                                 gpio_fd, ccdata, prev_gpio_state);
+                                 spi_fd, spi_timeout_ms, rldata);
 
-    process_transaction(transaction, deferred_transaction_data,
+    process_transaction(transaction, rldata,
                         fifo_in_fd, fifo_out_fd,
-                        spi_fd, spi_timeout_ms, ccdata);
+                        spi_fd, spi_timeout_ms);
 
     return true;
 }
