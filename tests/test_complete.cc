@@ -1124,6 +1124,9 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
         mock_messages->expect_msg_info_formatted(expected_message_buffer);
     }
 
+    cppcut_assert_equal(TR_MASTER_COMMAND_FORWARDING_TO_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(expected_master_serial, process_data->transaction.serial);
+
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
