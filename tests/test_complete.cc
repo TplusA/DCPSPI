@@ -430,7 +430,8 @@ static void expect_no_more_actions()
     cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
 }
 
-static void run_complete_single_slave_transaction(uint16_t expected_slave_serial)
+static void run_complete_single_slave_transaction(uint16_t expected_slave_serial,
+                                                  bool check_for_true_idle = true)
 {
     /* slave activates the request GPIO and sends write command for UPnP
      * friendly name */
@@ -488,7 +489,8 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     poll_results.check();
 
     /* done */
-    expect_no_more_actions();
+    if(check_for_true_idle)
+        expect_no_more_actions();
 }
 
 /*!\test
@@ -498,6 +500,98 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
 void test_single_slave_transaction()
 {
     run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN);
+}
+
+/*!\test
+ * Regular master write followed by a regular slave write, no collisions.
+ */
+void test_master_write_followed_by_slave_write()
+{
+    /* DCPD tells slave that the next external stream URL is empty */
+    static const std::array<uint8_t, 4> next_appstream_empty
+    {
+        DCP_COMMAND_MULTI_WRITE_REGISTER, 0xef, 0x00, 0x00,
+    };
+    std::vector<uint8_t> wrapped_appstream;
+    wrap_data_into_protocol(wrapped_appstream, 'c', UINT8_MAX, 0xeba9,
+                            next_appstream_empty.begin(), next_appstream_empty.size());
+    std::copy_n(wrapped_appstream.begin(), wrapped_appstream.size(),
+                std::back_inserter(os_read_buffer));
+
+    poll_results.expect(std::move(PollResult().set_return_value(0)));
+    poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_info_formatted(
+        "Master transaction: command header from DCPD: 0x02 0xef 0x00 0x00");
+    mock_messages->expect_msg_info_formatted("Master transaction: send 4 bytes over SPI");
+    expect_wait_for_spi_slave(dummy_time);
+    spi_rw_data->set(next_appstream_empty);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+    std::vector<uint8_t> master_command_ack;
+    wrap_data_into_protocol(master_command_ack, 'a', 0, 0xeba9);
+    cut_assert_equal_memory(master_command_ack.data(), master_command_ack.size(),
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+    mock_spi_hw->check();
+    poll_results.check();
+
+    /* short writes succeed within a single call of #dcpspi_process(), so we
+     * can process a slave request now */
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN);
+}
+
+/*!\test
+ * Regular slave write followed by a regular master write, no collisions.
+ */
+void test_slave_write_followed_by_master_write()
+{
+    /* slave sends something */
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, false);
+
+    /* done, now DCPD tells slave that the next external stream URL is empty */
+    static const std::array<uint8_t, 4> next_appstream_empty
+    {
+        DCP_COMMAND_MULTI_WRITE_REGISTER, 0xef, 0x00, 0x00,
+    };
+    std::vector<uint8_t> wrapped_appstream;
+    wrap_data_into_protocol(wrapped_appstream, 'c', UINT8_MAX, 0xeba9,
+                            next_appstream_empty.begin(), next_appstream_empty.size());
+    std::copy_n(wrapped_appstream.begin(), wrapped_appstream.size(),
+                std::back_inserter(os_read_buffer));
+
+    poll_results.expect(std::move(PollResult().set_return_value(0)));
+    poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_info_formatted(
+        "Master transaction: command header from DCPD: 0x02 0xef 0x00 0x00");
+    mock_messages->expect_msg_info_formatted("Master transaction: send 4 bytes over SPI");
+    expect_wait_for_spi_slave(dummy_time);
+    spi_rw_data->set(next_appstream_empty);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+    std::vector<uint8_t> master_command_ack;
+    wrap_data_into_protocol(master_command_ack, 'a', 0, 0xeba9);
+    cut_assert_equal_memory(master_command_ack.data(), master_command_ack.size(),
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+    mock_spi_hw->check();
+    poll_results.check();
+
+    /* done */
+    expect_no_more_actions();
 }
 
 /*!\test
@@ -1065,12 +1159,12 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
 
       case 0x20: /* ~_____ */
       case 0x08: /* __~___ */
+      case 0x30: /* ~~____ */
         /* early short peak: single complete activation */
         cppcut_assert_equal(REQSTATE_RELEASED,     previous_request_state);
         cppcut_assert_equal(REQSTATE_RELEASED,     process_data->transaction.request_state);
         break;
 
-      case 0x30: /* ~~____ */
       case 0x3c: /* ~~~~__ */
       case 0x0c: /* __~~__ */
         /* early long peak: single complete activation */
@@ -1505,6 +1599,16 @@ void test_collision_with_fast_early_request_release()
     collision_with_full_transaction_request(RequestPinBehavior::ON,
                                             RequestPinBehavior::UNCHANGED,
                                             RequestPinBehavior::OFF);
+}
+
+/*!\test
+ * Collision: Slave sends data bytes, request is early and not so long.
+ */
+void test_collision_with_faster_early_request_release()
+{
+    collision_with_full_transaction_request(RequestPinBehavior::ON,
+                                            RequestPinBehavior::OFF,
+                                            RequestPinBehavior::UNCHANGED);
 }
 
 /*!\test
