@@ -1,3 +1,22 @@
+2016-06-28  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.0 released.
+
+	* Communication with dcpd: Major changes in the protocol between
+	  dcpspi and dcpd. A small protocol has been added that encapsulates
+	  DCP to get collision handling and synchronization right.
+
+	  Also, dcpspi does not attempt to keep track of read commands and
+	  their corresponding answers because this was another root of many
+	  problems. It is not required to keep them related, contrary to
+	  assumptions made in 1.x versions.
+
+	* GPIO: Detect small peaks, always use poll(2) before sampling. There
+	  were several problems that could be traced down to the way the GPIO
+	  was read out.
+
+	* Dummy mode: Fixed so that it works again (was broken in v1.11).
+
 2016-05-23  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 1.11 released.
