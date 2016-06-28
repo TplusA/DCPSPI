@@ -172,7 +172,6 @@ bool reset_transaction_struct(struct dcp_transaction *transaction,
     {
       case REQSTATE_IDLE:
       case REQSTATE_RELEASED:
-      case REQSTATE_MISSED:
         transaction->request_state = REQSTATE_IDLE;
         break;
 
@@ -183,6 +182,10 @@ bool reset_transaction_struct(struct dcp_transaction *transaction,
       case REQSTATE_NEXT_PENDING:
         msg_info("Processing pending slave transaction");
         transaction->request_state = REQSTATE_LOCKED;
+        return true;
+
+      case REQSTATE_MISSED:
+        /* check residual bytes in SPI input buffer, if any */
         return true;
     }
 
@@ -223,11 +226,17 @@ static bool reset_transaction(struct dcp_transaction *transaction)
             return false;
         }
         else
+        {
+            const char *const what_next =
+                (transaction->request_state == REQSTATE_NEXT_PENDING
+                 ? "slave request pending"
+                 : (transaction->request_state == REQSTATE_MISSED
+                    ? "looking for missed transactions"
+                    : "return to idle state"));
+
             msg_info("End of transaction 0x%04x in state %d, %s",
-                     transaction->serial, transaction->state,
-                     (transaction->request_state != REQSTATE_NEXT_PENDING
-                      ? "return to idle state"
-                      : "slave request pending"));
+                     transaction->serial, transaction->state, what_next);
+        }
 
         break;
     }
@@ -438,8 +447,21 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
             msg_info("No transaction to process");
             return reset_transaction(transaction);
 
-          case REQSTATE_NEXT_PENDING:
           case REQSTATE_MISSED:
+            transaction->request_state = REQSTATE_RELEASED;
+
+            if(!spi_input_buffer_weed())
+            {
+                msg_info("No lost packets found in SPI input buffer");
+                return reset_transaction(transaction);
+            }
+
+            msg_info("Possibly found lost packet(s) in SPI input buffer");
+            transaction->state = TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE;
+
+            return true;
+
+          case REQSTATE_NEXT_PENDING:
             BUG("Invalid request state %d for idle transaction",
                 transaction->request_state);
             return false;

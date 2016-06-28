@@ -358,7 +358,8 @@ static size_t consume_from_buffer(struct spi_input_buffer *const restrict src,
     const size_t consumed =
         src->buffer_pos < dest_size ? src->buffer_pos : dest_size;
 
-    memcpy(dest, src->buffer, consumed);
+    if(dest != NULL)
+        memcpy(dest, src->buffer, consumed);
 
     if(consumed < src->buffer_pos)
     {
@@ -436,6 +437,35 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
     }
 
     return output_buffer_pos;
+}
+
+bool spi_input_buffer_weed(void)
+{
+    if(global_spi_input_buffer.buffer_pos == 0)
+        return false;
+
+    /* first byte must be zero, otherwise it's junk */
+    if(global_spi_input_buffer.buffer[0] != 0x00)
+        return false;
+
+    int cmd_idx;
+
+    if(global_spi_input_buffer.buffer_pos > 0 && global_spi_input_buffer.buffer[1] != 0x00)
+        cmd_idx = 1;
+    else if(global_spi_input_buffer.buffer_pos > 1 && global_spi_input_buffer.buffer[2] != 0x00)
+        cmd_idx = 2;
+    else
+        cmd_idx = -1;
+
+    if(cmd_idx < 0)
+        return false;
+
+    if(global_spi_input_buffer.buffer[cmd_idx] > DCP_COMMAND_MULTI_READ_REGISTER)
+        return false;
+
+    consume_from_buffer(&global_spi_input_buffer, NULL, cmd_idx);
+
+    return true;
 }
 
 void spi_new_transaction(void)

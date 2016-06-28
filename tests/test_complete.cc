@@ -1724,6 +1724,167 @@ void test_collision_with_follow_up_request_first_request_late_new_request_just_i
                                                          RequestPinBehavior::OFF_ON);
 }
 
+/*!
+ * Collision: Slave requests transaction, then requests the next one and sends
+ * the full second request together with the first one.
+ *
+ * This situation occurs in case the load on the Streaming Board is high and
+ * the slave is sending two subsequent requests quickly one after the other
+ * while a master transaction is about to start. In this case, dcpspi may not
+ * even see the first request and runs into an SPI collision. Two bytes are
+ * read by dcpspi, signaling to the slave that its GPIO request has been seen
+ * (even though it hasn't yet). The DCP header isn't fully there yet, so the
+ * next read from SPI slave is for a full chunk of 32 bytes. In the meantime,
+ * the slave has already prepared the next request and asserted the request pin
+ * again. It sends the rest of the first request and then sends the second
+ * request right after it.
+ *
+ * In theory (and rarely in practice), this effect can stack, meaning that
+ * multiple small requests may reside in the SPI input buffer for very unlucky
+ * timings and successive collisions. The communication temporarily falls out
+ * of sync as transaction requests are lost while processing some transaction
+ * because the Streaming Board fails to keep up with the speed of the SPI
+ * slave.
+ *
+ * The solution that dcpspi implements is that it peeks into the SPI input
+ * buffer after being done handling any requests performed after a collision if
+ * the request GPIO has been toggled in the meantime in such a way that lost
+ * transaction requests are indicated. If there is any pending request data, it
+ * will be processed. The input buffer must begin with one or two zeros (the
+ * ready signal) for this to work, otherwise it must be completely discarded
+ * (we cannot actively search for DCP messages in arbitrary buffers because the
+ * protocol lacks sync marks, and the binary nature of the protocol makes
+ * guessing risky).
+ */
+void test_collision_with_lost_and_found_slave_request()
+{
+    const auto &prepared_data(prepare_for_collision(0x920b, UINT8_MAX));
+    const auto &network_status(std::get<0>(prepared_data));
+    const auto &interrupting_slave_command_suffix(std::get<1>(prepared_data));
+    const auto &wrapped_interrupting_slave_command(std::get<2>(prepared_data));
+
+    create_collision_state(network_status.size() + DCPSYNC_HEADER_SIZE,
+                           network_status.size(), 0x920b,
+                           RequestPinBehavior::ON,
+                           RequestPinBehavior::OFF,
+                           RequestPinBehavior::UNCHANGED, 9);
+
+    /* next command tacked to the end of the first one, sent by slave because
+     * of unlucky timing; there could be a UINT8_MAX because first poll byte is
+     * usually that, and the 0x00 (sometimes 2 of them instead of UINT8_MAX) is
+     * the ready signal because the slave thought it's being polled */
+    static const std::array<uint8_t, 17> follow_up_slave_command
+    {
+        UINT8_MAX, 0x00, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x79, 0x0b, 0x00,
+        0x51, 0xc3, 0x01, 0xa9, 0xe4, 0x2e, 0x03, 0x3a, 0x02, 0x01, 0xfb,
+    };
+    cppcut_assert_equal(size_t(6), interrupting_slave_command_suffix.size());
+    std::array<uint8_t, 6 + follow_up_slave_command.size()> two_commands;
+
+    std::copy_n(interrupting_slave_command_suffix.data(),
+                interrupting_slave_command_suffix.size(),
+                two_commands.begin());
+    std::copy_n(follow_up_slave_command.data(),
+                follow_up_slave_command.size(),
+                two_commands.begin() + interrupting_slave_command_suffix.size());
+
+    /* switch over to slave transaction: slave sends write command for UPnP
+     * friendly name */
+    poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, two_commands);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: expecting 3 bytes from slave");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    cppcut_assert_equal(TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(uint16_t(DCPSYNC_SLAVE_SERIAL_MIN), process_data->transaction.serial);
+    cut_assert_equal_memory(wrapped_interrupting_slave_command.data(),
+                            wrapped_interrupting_slave_command.size(),
+                            process_data->transaction.dcp_buffer.buffer,
+                            process_data->transaction.dcp_buffer.pos);
+    cut_assert_true(os_write_buffer.empty());
+    mock_messages->check();
+    mock_gpio->check();
+    mock_spi_hw->check();
+
+    /* slave transaction: slave has prepared the next request and sends it
+     * while we are sending the first command to DCPD */
+    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_info_formatted(
+        "Pending slave request while processing transaction 0x0001");
+    mock_messages->expect_msg_error_formatted(0, LOG_WARNING,
+        "Lost slave request while processing transaction 0x0001");
+    mock_messages->expect_msg_info_formatted("Slave transaction: send 13 bytes to DCPD");
+    mock_messages->expect_msg_info_formatted(
+        "End of transaction 0x0001 in state 8, looking for missed transactions");
+    mock_messages->expect_msg_info_formatted("Possibly found lost packet(s) in SPI input buffer");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: command header from SPI: 0x02 0x79 0x0b 0x00");
+    mock_messages->expect_msg_info_formatted(
+        "Slave transaction: expecting 11 bytes from slave");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    std::vector<uint8_t> wrapped_second_slave_command;
+    wrap_data_into_protocol(wrapped_second_slave_command, 'c', 0, DCPSYNC_SLAVE_SERIAL_MIN + 1,
+                            follow_up_slave_command.begin() + 2,
+                            follow_up_slave_command.size() - 2);
+    cppcut_assert_equal(TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(uint16_t(DCPSYNC_SLAVE_SERIAL_MIN + 1), process_data->transaction.serial);
+    cut_assert_equal_memory(wrapped_interrupting_slave_command.data(),
+                            wrapped_interrupting_slave_command.size(),
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    cut_assert_equal_memory(wrapped_second_slave_command.data(),
+                            wrapped_second_slave_command.size(),
+                            process_data->transaction.dcp_buffer.buffer,
+                            process_data->transaction.dcp_buffer.pos);
+    mock_messages->check();
+    mock_gpio->check();
+    mock_spi_hw->check();
+
+    /* second slave transaction: send to DCPD */
+    poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_info_formatted("Slave transaction: send 21 bytes to DCPD");
+    mock_messages->expect_msg_info_formatted(
+        "End of transaction 0x0002 in state 8, return to idle state");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+    cppcut_assert_equal(REQSTATE_IDLE, process_data->transaction.request_state);
+    cppcut_assert_equal(size_t(0), process_data->transaction.spi_buffer.pos);
+    cppcut_assert_equal(uint16_t(DCPSYNC_SLAVE_SERIAL_INVALID), process_data->transaction.serial);
+    cppcut_assert_equal(uint16_t(0), process_data->transaction.pending_size_of_transaction);
+    cppcut_assert_equal(size_t(0), process_data->transaction.flush_to_dcpd_buffer_pos);
+    cut_assert_equal_memory(wrapped_second_slave_command.data(),
+                            wrapped_second_slave_command.size(),
+                            os_write_buffer.data(), os_write_buffer.size());
+    cppcut_assert_equal(size_t(0), process_data->transaction.dcp_buffer.pos);
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+    poll_results.check();
+
+    /* done */
+    expect_no_more_actions();
+}
+
 /*!\test
  * Collision occurs, but DCPD doesn't want to know (anymore).
  */

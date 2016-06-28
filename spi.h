@@ -96,6 +96,16 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
                         unsigned int timeout_ms);
 
 /*!
+ * Check if there could be another packet in the internal receive buffer.
+ *
+ * Also move the content so that a possible next packet is aligned with the
+ * beginning of the buffer. This function is useful to find out if there is any
+ * useful pending data in the buffer that would otherwise be discarded during
+ * the next slave transaction.
+ */
+bool spi_input_buffer_weed(void);
+
+/*!
  * Begin new transaction, clear internal receive buffer.
  *
  * This just calls #spi_reset(), but it also prints a log message in case there
