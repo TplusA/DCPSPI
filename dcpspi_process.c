@@ -364,10 +364,6 @@ static bool process_transaction_receive_data(struct dcp_transaction *transaction
     const char *read_peer =
         (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
 
-    msg_info("%s: expecting %u bytes from %s",
-             tr_log_prefix(transaction->state),
-             transaction->pending_size_of_transaction, read_peer);
-
     const size_t read_size = compute_read_size(transaction);
     const int bytes_read =
         (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
@@ -545,17 +541,11 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
             transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE] == UINT8_MAX;
 
         if(!is_dummy_header)
-        {
             transaction->spi_buffer.pos =
                 spi_fill_buffer_from_raw_data(transaction->spi_buffer.buffer,
                                               transaction->spi_buffer.size,
                                               transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE,
                                               transaction->dcp_buffer.pos - DCPSYNC_HEADER_SIZE);
-
-            msg_info("%s: send %zu bytes over SPI",
-                     tr_log_prefix(transaction->state),
-                     transaction->spi_buffer.pos);
-        }
 
         const enum SpiSendResult ret = is_dummy_header
             ? SPI_SEND_RESULT_OK
@@ -662,25 +652,24 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
         break;
 
       case TR_SLAVE_COMMAND_FORWARDING_TO_DCPD:
-        msg_info("%s: send %zu bytes to DCPD",
-                 tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.pos);
-
-        ssize_t sent_bytes =
-            send_buffer_to_fd(&transaction->dcp_buffer,
-                              transaction->flush_to_dcpd_buffer_pos,
-                              transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos,
-                              fifo_out_fd);
-
-        if(sent_bytes < 0)
         {
-            msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
-                      tr_log_prefix(transaction->state));
-            retval = reset_transaction(transaction);
-            break;
-        }
+            ssize_t sent_bytes =
+                send_buffer_to_fd(&transaction->dcp_buffer,
+                                  transaction->flush_to_dcpd_buffer_pos,
+                                  transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos,
+                                  fifo_out_fd);
 
-        transaction->flush_to_dcpd_buffer_pos += sent_bytes;
+            if(sent_bytes < 0)
+            {
+                msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
+                          tr_log_prefix(transaction->state));
+                retval = reset_transaction(transaction);
+                break;
+            }
+
+            transaction->flush_to_dcpd_buffer_pos += sent_bytes;
+
+        }
 
         if(transaction->flush_to_dcpd_buffer_pos >= transaction->dcp_buffer.pos)
             retval = reset_transaction(transaction);
