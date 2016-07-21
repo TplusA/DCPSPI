@@ -1,3 +1,11 @@
+2016-07-21  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.1 released.
+
+	* Performance: Reduce amount of log messages to spare CPU cycles. This
+	  is supposed to avoid stuttering audio playback at the start of
+	  streams.
+
 2016-06-28  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.0 released.
