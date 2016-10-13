@@ -297,6 +297,7 @@ static void fill_dcpsync_header_for_slave(uint8_t *dcpsync_header,
 static void send_packet_accepted_message(struct buffer *buffer,
                                          uint16_t serial, int fd)
 {
+    msg_vinfo(MESSAGE_LEVEL_TRACE, "ACK 0x%04x", serial);
     fill_dcpsync_header_generic(buffer->buffer, 'a', 0, serial, 0);
     send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
 }
@@ -304,6 +305,11 @@ static void send_packet_accepted_message(struct buffer *buffer,
 static void send_packet_rejected_message(struct buffer *buffer,
                                          uint16_t serial, uint8_t ttl, int fd)
 {
+    if(ttl > 0)
+        msg_vinfo(MESSAGE_LEVEL_TRACE, "NACK 0x%04x", serial);
+    else
+        msg_vinfo(MESSAGE_LEVEL_TRACE, "DROP 0x%04x", serial);
+
     fill_dcpsync_header_generic(buffer->buffer, 'n', ttl, serial, 0);
     send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
 }
@@ -426,6 +432,14 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
                                    int fifo_in_fd, int fifo_out_fd,
                                    int spi_fd, unsigned int spi_timeout_ms)
 {
+    msg_vinfo(MESSAGE_LEVEL_TRACE,
+              "Process transaction state %d, serial 0x%04x, lock state %d, "
+              "pending size %u, flush pos %zu",
+              transaction->state, transaction->serial,
+              transaction->request_state,
+              transaction->pending_size_of_transaction,
+              transaction->flush_to_dcpd_buffer_pos);
+
     bool retval = false;
 
     switch(transaction->state)
@@ -705,8 +719,13 @@ static enum RequestLineChanges determine_gpio_changes(bool current_state,
                                                       bool prev_state)
 {
     if(current_state != prev_state)
+    {
+        msg_vinfo(MESSAGE_LEVEL_TRACE, "*** GPIO %d -> %d ***", prev_state, current_state);
         return current_state ? REQUEST_LINE_ASSERTED : REQUEST_LINE_DEASSERTED;
+    }
 
+    msg_vinfo(MESSAGE_LEVEL_TRACE, "*** GPIO %d -> %d -> %d ***",
+              current_state, !current_state, current_state);
 
     return current_state
         ? REQUEST_LINE_DEASSERTED_AND_ASSERTED
@@ -864,6 +883,8 @@ static bool wait_for_events(const struct dcp_transaction *const transaction,
 
     if(ret > 0)
     {
+        if(fds[0].fd >= 0 && (fds[0].revents & POLLPRI) != 0)
+            msg_vinfo(MESSAGE_LEVEL_TRACE, "*** GPIO poll(2) event ***");
 
         return true;
     }
