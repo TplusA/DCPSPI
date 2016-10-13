@@ -51,9 +51,9 @@ static void show_version_info(void)
 
 static void log_version_info(void)
 {
-    msg_info("Rev %s%s, %s+%d, %s",
-             VCS_FULL_HASH, VCS_WC_MODIFIED ? " (tainted)" : "",
-             VCS_TAG, VCS_TICK, VCS_DATE);
+    msg_vinfo(MESSAGE_LEVEL_IMPORTANT, "Rev %s%s, %s+%d, %s",
+              VCS_FULL_HASH, VCS_WC_MODIFIED ? " (tainted)" : "",
+              VCS_TAG, VCS_TICK, VCS_DATE);
 }
 
 /*!
@@ -151,6 +151,7 @@ struct parameters
     const char *spidev_name;
     uint32_t spi_clock;
     unsigned int gpio_num;
+    enum MessageVerboseLevel verbose_level;
     bool run_in_foreground;
     bool gpio_needs_debouncing;
     bool dummy_mode;
@@ -164,6 +165,7 @@ static int setup(const struct parameters *parameters,
                  int *spi_fd, struct gpio_handle **gpio)
 {
     msg_enable_syslog(!parameters->run_in_foreground);
+    msg_set_verbose_level(parameters->verbose_level);
 
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);
@@ -228,6 +230,8 @@ static void usage(const char *program_name)
            "  --help         Show this help.\n"
            "  --version      Print version information to stdout.\n"
            "  --fg           Run in foreground, don't run as daemon.\n"
+           "  --verbose lvl  Set verbosity level to given level.\n"
+           "  --quiet        Short for \"--verbose quite\".\n"
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
            "  --spidev name  Name of the SPI device.\n"
@@ -245,6 +249,7 @@ static int process_command_line(int argc, char *argv[],
     parameters->spidev_name = "/dev/spidev0.0";
     parameters->spi_clock = 0;
     parameters->gpio_num = 4;
+    parameters->verbose_level = MESSAGE_LEVEL_NORMAL;
     parameters->run_in_foreground = false;
     parameters->gpio_needs_debouncing = false;
     parameters->dummy_mode = false;
@@ -269,6 +274,27 @@ static int process_command_line(int argc, char *argv[],
             return 2;
         else if(strcmp(argv[i], "--fg") == 0)
             parameters->run_in_foreground = true;
+        else if(strcmp(argv[i], "--verbose") == 0)
+        {
+            CHECK_ARGUMENT();
+            parameters->verbose_level = msg_verbose_level_name_to_level(argv[i]);
+
+            if(parameters->verbose_level == MESSAGE_LEVEL_IMPOSSIBLE)
+            {
+                fprintf(stderr,
+                        "Invalid verbosity \"%s\". "
+                        "Valid verbosity levels are:\n", argv[i]);
+
+                const char *const *names = msg_get_verbose_level_names();
+
+                for(const char *name = *names; name != NULL; name = *++names)
+                    fprintf(stderr, "    %s\n", name);
+
+                return -1;
+            }
+        }
+        else if(strcmp(argv[i], "--quiet") == 0)
+            parameters->verbose_level = MESSAGE_LEVEL_QUIET;
         else if(strcmp(argv[i], "--ififo") == 0)
         {
             CHECK_ARGUMENT();

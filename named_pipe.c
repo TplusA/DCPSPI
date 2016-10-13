@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -54,8 +54,9 @@ int fifo_open(const char *devname, bool write_not_read)
         msg_error(errno, LOG_EMERG,
                   "Failed opening named pipe \"%s\"", devname);
     else
-        msg_info("Opened %sable pipe \"%s\", fd %d",
-                 write_not_read ? "writ" : "read", devname, ret);
+        msg_vinfo(MESSAGE_LEVEL_TRACE,
+                  "Opened %sable pipe \"%s\", fd %d",
+                  write_not_read ? "writ" : "read", devname, ret);
 
     return ret;
 }

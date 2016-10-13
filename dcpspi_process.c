@@ -180,7 +180,7 @@ bool reset_transaction_struct(struct dcp_transaction *transaction,
         return true;
 
       case REQSTATE_NEXT_PENDING:
-        msg_info("Processing pending slave transaction");
+        msg_vinfo(MESSAGE_LEVEL_DIAG, "Processing pending slave transaction");
         transaction->request_state = REQSTATE_LOCKED;
         return true;
 
@@ -218,9 +218,10 @@ static bool reset_transaction(struct dcp_transaction *transaction)
       case TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT:
         if(transaction->request_state == REQSTATE_LOCKED)
         {
-            msg_info("About to end transaction 0x%04x in state %d, "
-                     "waiting for slave to release request line",
-                     transaction->serial, transaction->state);
+            msg_vinfo(MESSAGE_LEVEL_TRACE,
+                      "About to end transaction 0x%04x in state %d, "
+                      "waiting for slave to release request line",
+                      transaction->serial, transaction->state);
             transaction->state = TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT;
 
             return false;
@@ -234,8 +235,9 @@ static bool reset_transaction(struct dcp_transaction *transaction)
                     ? "looking for missed transactions"
                     : "return to idle state"));
 
-            msg_info("End of transaction 0x%04x in state %d, %s",
-                     transaction->serial, transaction->state, what_next);
+            msg_vinfo(MESSAGE_LEVEL_TRACE,
+                      "End of transaction 0x%04x in state %d, %s",
+                      transaction->serial, transaction->state, what_next);
         }
 
         break;
@@ -415,7 +417,8 @@ static void reject_or_drop(struct dcp_transaction *transaction,
                                      fifo_out_fd);
     }
     else
-        msg_info("Silently dropping 0x%04x", transaction->serial);
+        msg_vinfo(MESSAGE_LEVEL_DEBUG,
+                  "Silently dropping 0x%04x", transaction->serial);
 }
 
 static bool do_process_transaction(struct dcp_transaction *transaction,
@@ -478,8 +481,9 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
 
         if(transaction->dcp_buffer.pos != DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE)
         {
-            msg_info("%s: header from DCPD incomplete, waiting for more input",
-                     tr_log_prefix(transaction->state));
+            msg_vinfo(MESSAGE_LEVEL_DEBUG,
+                      "%s: header from DCPD incomplete, waiting for more input",
+                      tr_log_prefix(transaction->state));
             break;
         }
 
@@ -488,12 +492,13 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
          * validate the header content here because this is going to be done by
          * the receiver of the data. We rely on the DCPSYNC header instead.
          */
-        msg_info("%s: command header from DCPD: 0x%02x 0x%02x 0x%02x 0x%02x",
-                 tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
+        msg_vinfo(MESSAGE_LEVEL_DIAG,
+                  "%s: command header from DCPD: 0x%02x 0x%02x 0x%02x 0x%02x",
+                  tr_log_prefix(transaction->state),
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
 
         transaction->ttl = get_dcpsync_ttl(transaction->dcp_buffer.buffer);
         transaction->serial = get_dcpsync_serial(transaction->dcp_buffer.buffer);
@@ -596,12 +601,13 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
 
         transaction->dcp_buffer.pos = DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE;
 
-        msg_info("%s: command header from SPI: 0x%02x 0x%02x 0x%02x 0x%02x",
-                 tr_log_prefix(transaction->state),
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
-                 transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
+        msg_vinfo(MESSAGE_LEVEL_DIAG,
+                  "%s: command header from SPI: 0x%02x 0x%02x 0x%02x 0x%02x",
+                  tr_log_prefix(transaction->state),
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 0],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 1],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 2],
+                  transaction->dcp_buffer.buffer[DCPSYNC_HEADER_SIZE + 3]);
 
         const uint16_t dcp_payload_size =
             get_dcp_data_size(transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE);
@@ -741,8 +747,9 @@ static bool process_request_line(struct dcp_transaction *transaction,
                                         spi_fd, spi_timeout_ms);
                 }
                 else
-                    msg_info("Transaction 0x%04x interrupted by slave request",
-                             transaction->serial);
+                    msg_vinfo(MESSAGE_LEVEL_DIAG,
+                              "Transaction 0x%04x interrupted by slave request",
+                              transaction->serial);
 
                 break;
 
@@ -750,8 +757,9 @@ static bool process_request_line(struct dcp_transaction *transaction,
               case REQSTATE_MISSED:
                 transaction->request_state = REQSTATE_NEXT_PENDING;
 
-                msg_info("Pending slave request while processing transaction 0x%04x",
-                         transaction->serial);
+                msg_vinfo(MESSAGE_LEVEL_DIAG,
+                          "Pending slave request while processing transaction 0x%04x",
+                          transaction->serial);
 
                 break;
 
