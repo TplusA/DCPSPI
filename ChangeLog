@@ -1,3 +1,14 @@
+2016-10-24  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.2 released.
+
+	* Performance: Reduced amount of log messages to a bare minimum.
+	  Typically, dcpspi will only emit its version information and tell
+	  when it's ready to accept traffic.
+
+	* Logging: The verbosity can be specified from the command line now,
+	  so despite reduced amount of logs, debugging is easier now.
+
 2016-07-21  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.1 released.
