@@ -309,6 +309,8 @@ void cut_setup()
 
     poll_results.clear();
 
+    mock_messages->ignore_messages_with_level_or_above(MESSAGE_LEVEL_TRACE);
+
     static uint8_t dcp_backing_buffer[ProcessData::expected_dcp_buffer_size];
     static uint8_t spi_backing_buffer[ProcessData::expected_spi_buffer_size];
 
@@ -464,11 +466,6 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     /* send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
-    char expected_message_buffer[128];
-    snprintf(expected_message_buffer, sizeof(expected_message_buffer),
-             "End of transaction 0x%04x in state 8, return to idle state",
-             expected_slave_serial);
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE, expected_message_buffer);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1279,8 +1276,6 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
 
     /* slave transaction: send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "About to end transaction 0x0001 in state 8, waiting for slave to release request line");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1312,8 +1307,6 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
         "Ignoring data from DCPD until slave deasserts request pin");
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 9, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1377,8 +1370,6 @@ collision_with_full_transaction_request(const RequestPinBehavior rpb_gpio_only_w
 
     /* slave transaction: send write command to DCPD, and we are done */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1456,8 +1447,6 @@ static void collision_with_full_request_followed_by_open_request(
 
     /* slave transaction: send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 8, slave request pending");
     mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DIAG,
                                     "Processing pending slave transaction");
 
@@ -1508,8 +1497,6 @@ static void collision_with_full_request_followed_by_open_request(
      * command to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0002 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1791,8 +1778,6 @@ void test_collision_with_lost_and_found_slave_request()
         "Pending slave request while processing transaction 0x0001");
     mock_messages->expect_msg_error_formatted(0, LOG_WARNING,
         "Lost slave request while processing transaction 0x0001");
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 8, looking for missed transactions");
     mock_messages->expect_msg_info_formatted("Possibly found lost packet(s) in SPI input buffer");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
@@ -1823,8 +1808,6 @@ void test_collision_with_lost_and_found_slave_request()
 
     /* second slave transaction: send to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0002 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1956,8 +1939,6 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
 
     /* slave transaction: send write command to DCPD, and we are done */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2082,8 +2063,6 @@ void test_junk_is_forwarded_to_dcpd()
     /* send junk to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
-    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_TRACE,
-        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
