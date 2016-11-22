@@ -22,6 +22,7 @@
 #include "dcpspi_process.h"
 #include "dcpdefs.h"
 #include "spi.h"
+#include "hexdump.h"
 
 #include "mock_messages.hh"
 #include "mock_spi_hw.hh"
@@ -32,6 +33,15 @@
 ssize_t (*os_read)(int fd, void *dest, size_t count);
 ssize_t (*os_write)(int fd, const void *buf, size_t count);
 int (*os_poll)(struct pollfd *fds, nfds_t nfds, int timeout);
+
+/* Dummy implementation */
+void hexdump_to_log(enum MessageVerboseLevel level,
+                    const uint8_t *const buffer, size_t buffer_length,
+                    const char *what)
+{
+    cppcut_assert_not_null(buffer);
+    cppcut_assert_not_null(what);
+}
 
 namespace complete_tests
 {

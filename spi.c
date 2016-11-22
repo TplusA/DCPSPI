@@ -27,6 +27,7 @@
 #include "spi_hw.h"
 #include "dcpdefs.h"
 #include "messages.h"
+#include "hexdump.h"
 #include "os.h"
 
 /*!
@@ -181,6 +182,8 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
             return SPI_SEND_RESULT_FAILURE;
         }
 
+        hexdump_to_log(MESSAGE_LEVEL_TRACE, buffer, buffer_size, "Received");
+
         for(size_t i = 0; i < buffer_size; ++i)
         {
             if(buffer[i] == 0)
@@ -230,7 +233,11 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
             in->buffer_pos);
 
     if(bytes_left > 0)
+    {
         memcpy(in->buffer, poll_bytes_buffer, bytes_left);
+        hexdump_to_log(MESSAGE_LEVEL_DIAG,
+                       in->buffer, bytes_left, "Colliding poll bytes");
+    }
 
     in->buffer_pos = bytes_left;
     in->pending_escape_sequence = pending_escape_sequence;
@@ -256,6 +263,17 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
 
     if(wait_result != SPI_SEND_RESULT_OK)
     {
+        if(wait_result == SPI_SEND_RESULT_COLLISION)
+        {
+            hexdump_to_log(MESSAGE_LEVEL_DIAG,
+                           buffer, length, "Tried to send during collision");
+
+            if(have_significant_data)
+                hexdump_to_log(MESSAGE_LEVEL_DIAG,
+                               poll_bytes_buffer, sizeof(poll_bytes_buffer),
+                               "Received poll bytes during collision");
+        }
+
         if(wait_result == SPI_SEND_RESULT_COLLISION && have_significant_data)
             handle_collision(poll_bytes_buffer, sizeof(poll_bytes_buffer),
                              &global_spi_input_buffer);
@@ -284,7 +302,10 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         return SPI_SEND_RESULT_FAILURE;
     }
     else
+    {
+        hexdump_to_log(MESSAGE_LEVEL_TRACE, buffer, length, "Sent");
         return SPI_SEND_RESULT_OK;
+    }
 }
 
 size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
@@ -344,6 +365,9 @@ static ssize_t read_chunk(int fd, struct spi_input_buffer *const in)
                   spi_transfer[0].len, fd);
         return -1;
     }
+
+    hexdump_to_log(MESSAGE_LEVEL_TRACE,
+                   in->buffer, sizeof(spi_dummy_bytes), "Received");
 
     return filter_input(in->buffer, sizeof(spi_dummy_bytes),
                         &in->pending_escape_sequence);
@@ -471,8 +495,13 @@ bool spi_input_buffer_weed(void)
 void spi_new_transaction(void)
 {
     if(global_spi_input_buffer.buffer_pos > 0)
+    {
         msg_info("Discarding %zu bytes from SPI receive buffer",
                  global_spi_input_buffer.buffer_pos);
+        hexdump_to_log(MESSAGE_LEVEL_DEBUG,
+                       global_spi_input_buffer.buffer,
+                       global_spi_input_buffer.buffer_pos, "Discarded buffer");
+    }
 
     spi_reset();
 }

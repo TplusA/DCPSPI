@@ -21,6 +21,7 @@
 
 #include "spi.h"
 #include "dcpdefs.h"
+#include "hexdump.h"
 
 #include "mock_messages.hh"
 #include "mock_spi_hw.hh"
@@ -34,6 +35,15 @@
  * SPI communication unit tests.
  */
 /*!@{*/
+
+/* Dummy implementation */
+void hexdump_to_log(enum MessageVerboseLevel level,
+                    const uint8_t *const buffer, size_t buffer_length,
+                    const char *what)
+{
+    cppcut_assert_not_null(buffer);
+    cppcut_assert_not_null(what);
+}
 
 namespace spi_communication_tests
 {
