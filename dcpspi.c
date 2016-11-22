@@ -34,6 +34,7 @@
 #include "gpio.h"
 #include "versioninfo.h"
 #include "messages.h"
+#include "messages_signal.h"
 
 ssize_t (*os_read)(int fd, void *dest, size_t count) = read;
 ssize_t (*os_write)(int fd, const void *buf, size_t count) = write;
@@ -166,6 +167,7 @@ static int setup(const struct parameters *parameters,
 {
     msg_enable_syslog(!parameters->run_in_foreground);
     msg_set_verbose_level(parameters->verbose_level);
+    msg_install_debug_level_signals();
 
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);

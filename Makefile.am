@@ -30,6 +30,7 @@ CLEANFILES = README.html
 
 dcpspi_SOURCES = \
     dcpspi.c dcpspi_process.h dcpdefs.h os.c os.h messages.c messages.h \
+    messages_signal.c messages_signal.h \
     named_pipe.c named_pipe.h \
     gpio.c gpio.h spi.h spi_hw.c spi_hw.h
 
