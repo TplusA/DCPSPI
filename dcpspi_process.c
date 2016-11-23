@@ -218,7 +218,7 @@ static bool reset_transaction(struct dcp_transaction *transaction)
       case TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT:
         if(transaction->request_state == REQSTATE_LOCKED)
         {
-            msg_vinfo(MESSAGE_LEVEL_TRACE,
+            msg_vinfo(MESSAGE_LEVEL_DEBUG,
                       "About to end transaction 0x%04x in state %d, "
                       "waiting for slave to release request line",
                       transaction->serial, transaction->state);
@@ -235,7 +235,7 @@ static bool reset_transaction(struct dcp_transaction *transaction)
                     ? "looking for missed transactions"
                     : "return to idle state"));
 
-            msg_vinfo(MESSAGE_LEVEL_TRACE,
+            msg_vinfo(MESSAGE_LEVEL_DEBUG,
                       "End of transaction 0x%04x in state %d, %s",
                       transaction->serial, transaction->state, what_next);
         }
@@ -423,7 +423,7 @@ static void reject_or_drop(struct dcp_transaction *transaction,
                                      fifo_out_fd);
     }
     else
-        msg_vinfo(MESSAGE_LEVEL_DEBUG,
+        msg_vinfo(MESSAGE_LEVEL_DIAG,
                   "Silently dropping 0x%04x", transaction->serial);
 }
 
@@ -432,7 +432,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
                                    int fifo_in_fd, int fifo_out_fd,
                                    int spi_fd, unsigned int spi_timeout_ms)
 {
-    msg_vinfo(MESSAGE_LEVEL_TRACE,
+    msg_vinfo(MESSAGE_LEVEL_DEBUG,
               "Process transaction state %d, serial 0x%04x, lock state %d, "
               "pending size %u, flush pos %zu",
               transaction->state, transaction->serial,
@@ -495,7 +495,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
 
         if(transaction->dcp_buffer.pos != DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE)
         {
-            msg_vinfo(MESSAGE_LEVEL_DEBUG,
+            msg_vinfo(MESSAGE_LEVEL_DIAG,
                       "%s: header from DCPD incomplete, waiting for more input",
                       tr_log_prefix(transaction->state));
             break;

@@ -249,6 +249,9 @@ static ProcessData *process_data;
 static std::vector<uint8_t> os_write_buffer;
 static std::vector<uint8_t> os_read_buffer;
 
+static constexpr char process_transaction_message[] =
+    "Process transaction state %d, serial 0x%04x, lock state %d, pending size %u, flush pos %zu";
+
 static ssize_t read_mock(int fd, void *dest, size_t count)
 {
     cppcut_assert_equal(expected_fifo_in_fd, fd);
@@ -443,7 +446,8 @@ static void expect_no_more_actions()
 }
 
 static void run_complete_single_slave_transaction(uint16_t expected_slave_serial,
-                                                  bool check_for_true_idle = true)
+                                                  bool expecting_extra_process_message,
+                                                  bool check_for_true_idle)
 {
     /* slave activates the request GPIO and sends write command for UPnP
      * friendly name */
@@ -457,6 +461,11 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     };
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, write_command);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+    if(expecting_extra_process_message)
+        mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
+
+    mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -476,6 +485,17 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     /* send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    char expected_process_message[256];
+    snprintf(expected_process_message, sizeof(expected_process_message),
+             process_transaction_message,
+             TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, expected_slave_serial,
+             REQSTATE_RELEASED, 0, size_t(0));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_process_message);
+    char expected_end_message[128];
+    snprintf(expected_end_message, sizeof(expected_end_message),
+             "End of transaction 0x%04x in state %d, return to idle state",
+             expected_slave_serial, TR_SLAVE_COMMAND_FORWARDING_TO_DCPD);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_end_message);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -503,7 +523,7 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
  */
 void test_single_slave_transaction()
 {
-    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN);
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, true, true);
 }
 
 /*!\test
@@ -524,6 +544,8 @@ void test_master_write_followed_by_slave_write()
 
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Master transaction: command header from DCPD: 0x02 0xef 0x00 0x00");
     expect_wait_for_spi_slave(dummy_time);
@@ -547,7 +569,7 @@ void test_master_write_followed_by_slave_write()
 
     /* short writes succeed within a single call of #dcpspi_process(), so we
      * can process a slave request now */
-    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN);
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, true, true);
 }
 
 /*!\test
@@ -556,7 +578,7 @@ void test_master_write_followed_by_slave_write()
 void test_slave_write_followed_by_master_write()
 {
     /* slave sends something */
-    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, false);
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, true, false);
 
     /* done, now DCPD tells slave that the next external stream URL is empty */
     static const std::array<uint8_t, 4> next_appstream_empty
@@ -571,6 +593,8 @@ void test_slave_write_followed_by_master_write()
 
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Master transaction: command header from DCPD: 0x02 0xef 0x00 0x00");
     expect_wait_for_spi_slave(dummy_time);
@@ -628,6 +652,8 @@ void test_two_fast_master_transactions()
 
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Master transaction: command header from DCPD: 0x03 0x32 0x02 0x00");
 
@@ -646,6 +672,8 @@ void test_two_fast_master_transactions()
     /* process data from DCPD remaining in pipe buffer */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 2, serial 0xc830, lock state 0, pending size 2, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -671,6 +699,8 @@ void test_two_fast_master_transactions()
     expect_wait_for_spi_slave(dummy_time);
     spi_rw_data->set(network_status);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 3, serial 0xc830, lock state 0, pending size 0, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -693,6 +723,8 @@ void test_two_fast_master_transactions()
 
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Master transaction: command header from DCPD: 0x03 0x11 0x02 0x00");
 
@@ -711,6 +743,8 @@ void test_two_fast_master_transactions()
     /* process data from DCPD remaining in pipe buffer */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 2, serial 0xc831, lock state 0, pending size 2, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -736,6 +770,8 @@ void test_two_fast_master_transactions()
     expect_wait_for_spi_slave(dummy_time);
     spi_rw_data->set(device_status);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 3, serial 0xc831, lock state 0, pending size 0, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -883,6 +919,8 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
     char expected_message_buffer[1024];
 
     /* DCPD sends something through its pipe */
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
     snprintf(expected_message_buffer, sizeof(expected_message_buffer),
@@ -1020,10 +1058,13 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
         pending_slave_request_detected = true;
     }
 
+    mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
+
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
 
+    mock_messages->check();
     const enum transaction_request_state previous_request_state =
         process_data->transaction.request_state;
 
@@ -1104,6 +1145,7 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
 
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
 
@@ -1111,7 +1153,7 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
     {
         snprintf(expected_message_buffer, sizeof(expected_message_buffer),
                  "Silently dropping 0x%04x", expected_master_serial);
-        mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_message_buffer);
+        mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG, expected_message_buffer);
     }
 
     cppcut_assert_equal(TR_MASTER_COMMAND_FORWARDING_TO_SLAVE, process_data->transaction.state);
@@ -1121,6 +1163,7 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
 
+    mock_messages->check();
     cppcut_assert_equal(TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
 
     switch(gpio_trace)
@@ -1265,6 +1308,8 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1286,6 +1331,10 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
 
     /* slave transaction: send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 1, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "About to end transaction 0x0001 in state 8, waiting for slave to release request line");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1313,8 +1362,13 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
     poll_results.check();
 
     /* nice, now the SPI slave releases its request line, a bit slow today */
+    cppcut_assert_equal(size_t(13), wrapped_interrupting_slave_command.size());
     mock_messages->expect_msg_info_formatted(
         "Ignoring data from DCPD until slave deasserts request pin");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 9, serial 0x0001, lock state 2, pending size 0, flush pos 13");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 9, return to idle state");
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
 
@@ -1359,6 +1413,8 @@ collision_with_full_transaction_request(const RequestPinBehavior rpb_gpio_only_w
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1380,6 +1436,10 @@ collision_with_full_transaction_request(const RequestPinBehavior rpb_gpio_only_w
 
     /* slave transaction: send write command to DCPD, and we are done */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 2, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1436,6 +1496,8 @@ static void collision_with_full_request_followed_by_open_request(
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 3, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1457,8 +1519,14 @@ static void collision_with_full_request_followed_by_open_request(
 
     /* slave transaction: send write command to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 3, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 8, slave request pending");
     mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DIAG,
                                     "Processing pending slave transaction");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 1, pending size 0, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1487,6 +1555,8 @@ static void collision_with_full_request_followed_by_open_request(
     };
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, drcp_store_favorites);
     expect_wait_for_spi_slave(dummy_time);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x48 0x01 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1507,6 +1577,10 @@ static void collision_with_full_request_followed_by_open_request(
      * command to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0002, lock state 2, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0002 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1761,6 +1835,8 @@ void test_collision_with_lost_and_found_slave_request()
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, two_commands);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1788,8 +1864,16 @@ void test_collision_with_lost_and_found_slave_request()
         "Pending slave request while processing transaction 0x0001");
     mock_messages->expect_msg_error_formatted(0, LOG_WARNING,
         "Lost slave request while processing transaction 0x0001");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 4, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 8, looking for missed transactions");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 4, pending size 0, flush pos 0");
     mock_messages->expect_msg_info_formatted("Possibly found lost packet(s) in SPI input buffer");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x79 0x0b 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1818,6 +1902,10 @@ void test_collision_with_lost_and_found_slave_request()
 
     /* second slave transaction: send to DCPD */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0002, lock state 2, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0002 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1928,6 +2016,8 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -1949,6 +2039,10 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
 
     /* slave transaction: send write command to DCPD, and we are done */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 2, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1975,6 +2069,8 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
 
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 0, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Master transaction: command header from DCPD: 0x03 0x11 0x02 0x00");
 
@@ -1993,6 +2089,8 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
     /* process data from DCPD remaining in pipe buffer */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
     poll_results.expect(std::move(PollResult().set_dcpd_events(POLLIN).set_return_value(1)));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 2, serial 0xc0e6, lock state 0, pending size 2, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2018,6 +2116,8 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
     expect_wait_for_spi_slave(dummy_time);
     spi_rw_data->set(device_status);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 3, serial 0xc0e6, lock state 0, pending size 0, flush pos 0");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2055,6 +2155,10 @@ void test_junk_is_forwarded_to_dcpd()
     };
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, junk_bytes);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 1, pending size 0, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x80 0x01 0xfe 0x9a");
 
@@ -2073,6 +2177,10 @@ void test_junk_is_forwarded_to_dcpd()
     /* send junk to DCPD */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 8, serial 0x0001, lock state 2, pending size 10, flush pos 0");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 8, return to idle state");
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2094,10 +2202,12 @@ void test_junk_is_forwarded_to_dcpd()
 
     /* see what's going on with the junk that is still in the SPI input buffer
      * on next transaction */
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_info_formatted(
         "Discarding 6 bytes from SPI receive buffer");
 
-    run_complete_single_slave_transaction(0x0002);
+    run_complete_single_slave_transaction(0x0002, false, true);
 }
 
 }
