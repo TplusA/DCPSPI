@@ -1,3 +1,12 @@
+2016-11-25  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.3 released.
+
+	* Debugging: Log all SPI traffic as hex dump at highest verbosity
+	  level.
+
+	* Debugging: Allow setting verbosity level via Unix signal.
+
 2016-10-24  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.2 released.
