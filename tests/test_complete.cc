@@ -1975,7 +1975,7 @@ void test_collision_with_command_ttl_of_1()
  * This can happen because DCPD may want to push multiple packets into the pipe
  * buffer in the hope of higher throughput as long as no collision occurs.
  * In case of a collision with a slave transaction, however, the most recent
- * master transaction is going to be rejected and must DCPD must send it again.
+ * master transaction is going to be rejected and DCPD must send it again.
  *
  * Note that this will lead to reordering of packets, leading to messed up data
  * in case of long data fragmented over multiple packets (such as DRC data)>.
