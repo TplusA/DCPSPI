@@ -1,3 +1,10 @@
+2017-10-23  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.4 released.
+
+	* Debugging: Improved hex dumps (resembling "hexdump -C") for a nicer
+	  debugging experience.
+
 2016-11-25  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.3 released.
