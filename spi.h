@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -124,6 +124,18 @@ void spi_reset(void);
  * Set clock speed for SPI transfers in Hz.
  */
 void spi_set_speed_hz(uint32_t hz);
+
+/*!
+ * Dump all SPI traffic only at highest debug level.
+ *
+ * This is the default behavior.
+ */
+void spi_disable_traffic_dump(void);
+
+/*!
+ * Dump all SPI traffic despite of debug level.
+ */
+void spi_enable_traffic_dump(void);
 
 #ifdef __cplusplus
 }

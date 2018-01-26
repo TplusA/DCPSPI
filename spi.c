@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -46,6 +46,24 @@ static const uint8_t spi_dummy_bytes[32] =
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
+
+static enum MessageVerboseLevel hexdump_traffic_level   = MESSAGE_LEVEL_TRACE;
+static enum MessageVerboseLevel hexdump_discarded_level = MESSAGE_LEVEL_DEBUG;
+static enum MessageVerboseLevel hexdump_collision_level = MESSAGE_LEVEL_DIAG;
+
+void spi_disable_traffic_dump(void)
+{
+    hexdump_traffic_level   = MESSAGE_LEVEL_TRACE;
+    hexdump_discarded_level = MESSAGE_LEVEL_DEBUG;
+    hexdump_collision_level = MESSAGE_LEVEL_DIAG;
+}
+
+void spi_enable_traffic_dump(void)
+{
+    hexdump_traffic_level   = MESSAGE_LEVEL_INFO_MIN;
+    hexdump_discarded_level = MESSAGE_LEVEL_INFO_MIN;
+    hexdump_collision_level = MESSAGE_LEVEL_INFO_MIN;
+}
 
 struct spi_input_buffer
 {
@@ -182,7 +200,7 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
             return SPI_SEND_RESULT_FAILURE;
         }
 
-        hexdump_to_log(MESSAGE_LEVEL_TRACE, buffer, buffer_size, "Received");
+        hexdump_to_log(hexdump_traffic_level, buffer, buffer_size, "Received");
 
         for(size_t i = 0; i < buffer_size; ++i)
         {
@@ -235,7 +253,7 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
     if(bytes_left > 0)
     {
         memcpy(in->buffer, poll_bytes_buffer, bytes_left);
-        hexdump_to_log(MESSAGE_LEVEL_DIAG,
+        hexdump_to_log(hexdump_collision_level,
                        in->buffer, bytes_left, "Colliding poll bytes");
     }
 
@@ -265,11 +283,11 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     {
         if(wait_result == SPI_SEND_RESULT_COLLISION)
         {
-            hexdump_to_log(MESSAGE_LEVEL_DIAG,
+            hexdump_to_log(hexdump_collision_level,
                            buffer, length, "Tried to send during collision");
 
             if(have_significant_data)
-                hexdump_to_log(MESSAGE_LEVEL_DIAG,
+                hexdump_to_log(hexdump_collision_level,
                                poll_bytes_buffer, sizeof(poll_bytes_buffer),
                                "Received poll bytes during collision");
         }
@@ -303,7 +321,7 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     }
     else
     {
-        hexdump_to_log(MESSAGE_LEVEL_TRACE, buffer, length, "Sent");
+        hexdump_to_log(hexdump_traffic_level, buffer, length, "Sent");
         return SPI_SEND_RESULT_OK;
     }
 }
@@ -366,7 +384,7 @@ static ssize_t read_chunk(int fd, struct spi_input_buffer *const in)
         return -1;
     }
 
-    hexdump_to_log(MESSAGE_LEVEL_TRACE,
+    hexdump_to_log(hexdump_traffic_level,
                    in->buffer, sizeof(spi_dummy_bytes), "Received");
 
     return filter_input(in->buffer, sizeof(spi_dummy_bytes),
@@ -498,7 +516,7 @@ void spi_new_transaction(void)
     {
         msg_info("Discarding %zu bytes from SPI receive buffer",
                  global_spi_input_buffer.buffer_pos);
-        hexdump_to_log(MESSAGE_LEVEL_DEBUG,
+        hexdump_to_log(hexdump_discarded_level,
                        global_spi_input_buffer.buffer,
                        global_spi_input_buffer.buffer_pos, "Discarded buffer");
     }

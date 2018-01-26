@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -145,6 +145,23 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
         ;
 }
 
+static void toggle_traffic_logs(unsigned int relative_signum)
+{
+    switch(relative_signum)
+    {
+      case 0:
+        spi_disable_traffic_dump();
+        break;
+
+      case 1:
+        spi_enable_traffic_dump();
+        break;
+
+      default:
+        break;
+    };
+}
+
 struct parameters
 {
     const char *fifo_in_name;
@@ -168,6 +185,8 @@ static int setup(const struct parameters *parameters,
     msg_enable_syslog(!parameters->run_in_foreground);
     msg_set_verbose_level(parameters->verbose_level);
     msg_install_debug_level_signals();
+    msg_install_extra_handler(0, toggle_traffic_logs);
+    msg_install_extra_handler(1, toggle_traffic_logs);
 
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);
