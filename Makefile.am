@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+# Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
 #
 # This file is part of DCPSPI.
 #
@@ -22,7 +22,9 @@ ACLOCAL_AMFLAGS = -I m4
 
 bin_PROGRAMS = dcpspi
 
+if WITH_MARKDOWN
 html_DATA = README.html
+endif
 
 EXTRA_DIST = README.md cppcheck_suppressed.txt
 
