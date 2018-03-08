@@ -1,3 +1,10 @@
+2018-03-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.6 released. Functionality unchanged, only build system is
+	  affected.
+
+	* Misc: Do not error out if markdown is not installed.
+
 2018-01-26  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.5 released.
