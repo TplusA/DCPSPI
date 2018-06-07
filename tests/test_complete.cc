@@ -2274,6 +2274,9 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
      * have anything for us anymore */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_error_formatted(0, LOG_CRIT,
+        "APPLIANCE BUG: Transaction was requested by slave, but request pin is deasserted now. "
+        "We will try to process this pending transaction anyway.");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
@@ -2345,6 +2348,9 @@ void test_new_transaction_even_if_slave_deasserts_request_line_too_soon()
      * still data the slave is willing to give to us */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_error_formatted(0, LOG_CRIT,
+        "APPLIANCE BUG: Transaction was requested by slave, but request pin is deasserted now. "
+        "We will try to process this pending transaction anyway.");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);

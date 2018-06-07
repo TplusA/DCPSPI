@@ -745,6 +745,11 @@ static bool process_request_line(struct dcp_transaction *transaction,
 
     rldata->previous_gpio_state = current_gpio_state;
 
+    if(!current_gpio_state &&
+       transaction->state == TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE)
+        APPLIANCE_BUG("Transaction was requested by slave, but request pin is deasserted now. "
+                      "We will try to process this pending transaction anyway.");
+
     bool processing = true;
 
     while(processing)
