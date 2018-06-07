@@ -447,7 +447,8 @@ static void expect_no_more_actions()
 
 static void run_complete_single_slave_transaction(uint16_t expected_slave_serial,
                                                   bool expecting_extra_process_message,
-                                                  bool check_for_true_idle)
+                                                  bool check_for_true_idle,
+                                                  bool slow_request_release = false)
 {
     /* slave activates the request GPIO and sends write command for UPnP
      * friendly name */
@@ -483,25 +484,41 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     poll_results.check();
 
     /* send write command to DCPD */
-    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
-    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    if(slow_request_release)
+        poll_results.expect(std::move(PollResult().set_return_value(0)));
+    else
+    {
+        poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+        mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    }
+
     char expected_process_message[256];
     snprintf(expected_process_message, sizeof(expected_process_message),
              process_transaction_message,
              TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, expected_slave_serial,
-             REQSTATE_RELEASED, 0, size_t(0));
+             slow_request_release ? REQSTATE_LOCKED : REQSTATE_RELEASED,
+             0, size_t(0));
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_process_message);
     char expected_end_message[128];
-    snprintf(expected_end_message, sizeof(expected_end_message),
-             "End of transaction 0x%04x in state %d, return to idle state",
-             expected_slave_serial, TR_SLAVE_COMMAND_FORWARDING_TO_DCPD);
+
+    if(slow_request_release)
+        snprintf(expected_end_message, sizeof(expected_end_message),
+                 "About to end transaction 0x%04x in state %d, "
+                 "waiting for slave to release request line",
+                 expected_slave_serial, TR_SLAVE_COMMAND_FORWARDING_TO_DCPD);
+    else
+        snprintf(expected_end_message, sizeof(expected_end_message),
+                "End of transaction 0x%04x in state %d, return to idle state",
+                expected_slave_serial, TR_SLAVE_COMMAND_FORWARDING_TO_DCPD);
+
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_end_message);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
 
-    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+    cppcut_assert_equal(slow_request_release ? TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT : TR_IDLE,
+                        process_data->transaction.state);
     std::vector<uint8_t> wrapped_write_command;
     wrap_data_into_protocol(wrapped_write_command, 'c', 0, expected_slave_serial,
                             write_command.begin() + 1, write_command.size() - 1);
@@ -2208,6 +2225,185 @@ void test_junk_is_forwarded_to_dcpd()
         "Discarding 6 bytes from SPI receive buffer");
 
     run_complete_single_slave_transaction(0x0002, false, true);
+}
+
+/*!\test
+ * In case the slave tries to send two successive messages, but is sloppy with
+ * the request signal, then we may lose a message (depending on implementation
+ * on slave side) and end up recovering via timeout.
+ *
+ * Processing continues after our internal timeout has expired.
+ */
+void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon()
+{
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, true, false, true);
+
+    /* at this point, we have a transaction in a state waiting for deasserting
+     * the request pin; let's assume the SPI slave toggles the request line too
+     * quick for us to see the deasserted state, and the next read-out yields
+     * an asserted state again; we can actually detect this situation and react
+     * accordingly */
+    cppcut_assert_equal(TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT, process_data->transaction.state);
+    cppcut_assert_equal(REQSTATE_LOCKED, process_data->transaction.request_state);
+
+    mock_messages->expect_msg_info_formatted("Waiting for slave to deassert the request pin");
+    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted("Slave has deasserted the request pin (and has asserted it again)");
+    expect_detection_of_pending_slave_request(DCPSYNC_SLAVE_SERIAL_MIN);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 9, serial 0x0001, lock state 3, pending size 0, flush pos 13");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 9, slave request pending");
+    mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DIAG,
+                                    "Processing pending slave transaction");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 1, pending size 0, flush pos 0");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    /* we know there is (or at least, was) a pending request and we are going
+     * to process it */
+    cppcut_assert_equal(TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQSTATE_LOCKED, process_data->transaction.request_state);
+
+    /* the slave has already released the GPIO pin in the meantime (which must
+     * be considered a bug in the implementation on slave side) and doesn't
+     * have anything for us anymore */
+    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    spi_rw_data->set<read_from_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                                        spi_rw_data_t::EXPECT_READ_NOPS,
+                                                        false);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    static constexpr int timeout_seconds = 1;
+    static const struct timespec expired_time =
+    {
+        .tv_sec = dummy_time.tv_sec + timeout_seconds,
+        .tv_nsec = dummy_time.tv_nsec,
+    };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, expired_time);
+    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
+        "SPI read timeout, returning 0 of 4 bytes");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0000 in state 6, return to idle state");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    expect_no_more_actions();
+}
+
+/*!\test
+ * In case the slave tries to send two successive messages, but is sloppy with
+ * the request signal, then we may still receive a message (depending on
+ * implementation on slave side) we can process.
+ */
+void test_new_transaction_even_if_slave_deasserts_request_line_too_soon()
+{
+    run_complete_single_slave_transaction(DCPSYNC_SLAVE_SERIAL_MIN, true, false, true);
+
+    /* at this point, we have a transaction in a state waiting for deasserting
+     * the request pin; let's assume the SPI slave toggles the request line too
+     * quick for us to see the deasserted state, and the next read-out yields
+     * an asserted state again; we can actually detect this situation and react
+     * accordingly */
+    cppcut_assert_equal(TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT, process_data->transaction.state);
+    cppcut_assert_equal(REQSTATE_LOCKED, process_data->transaction.request_state);
+
+    mock_messages->expect_msg_info_formatted("Waiting for slave to deassert the request pin");
+    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+    mock_gpio->expect_gpio_is_active(true, process_data->gpio);
+    mock_messages->expect_msg_info_formatted("Slave has deasserted the request pin (and has asserted it again)");
+    expect_detection_of_pending_slave_request(DCPSYNC_SLAVE_SERIAL_MIN);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 9, serial 0x0001, lock state 3, pending size 0, flush pos 13");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "End of transaction 0x0001 in state 9, slave request pending");
+    mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DIAG,
+                                    "Processing pending slave transaction");
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 0, serial 0x0000, lock state 1, pending size 0, flush pos 0");
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    /* we know there is (or at least, was) a pending request and we are going
+     * to process it */
+    cppcut_assert_equal(TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
+    cppcut_assert_equal(REQSTATE_LOCKED, process_data->transaction.request_state);
+
+    /* the slave has already released the GPIO pin in the meantime (which must
+     * be considered a bug in the implementation on slave side), but there are
+     * still data the slave is willing to give to us */
+    poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
+    mock_gpio->expect_gpio_is_active(false, process_data->gpio);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
+        "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    static const std::array<uint8_t, 8> write_command
+    {
+        UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
+        0x61, 0x62, 0x63
+    };
+    spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, write_command);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
+        "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    static const uint16_t expected_slave_serial = DCPSYNC_SLAVE_SERIAL_MIN + 1;
+    cppcut_assert_equal(TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, process_data->transaction.state);
+    cppcut_assert_equal(expected_slave_serial, process_data->transaction.serial);
+    cut_assert_true(os_write_buffer.empty());
+    mock_messages->check();
+    mock_gpio->check();
+    mock_os->check();
+    mock_spi_hw->check();
+    poll_results.check();
+
+    /* send write command to DCPD */
+    poll_results.expect(std::move(PollResult().set_return_value(0)));
+
+    char expected_process_message[256];
+    snprintf(expected_process_message, sizeof(expected_process_message),
+             process_transaction_message,
+             TR_SLAVE_COMMAND_FORWARDING_TO_DCPD, expected_slave_serial,
+             REQSTATE_RELEASED, 0, size_t(0));
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_process_message);
+    char expected_end_message[128];
+    snprintf(expected_end_message, sizeof(expected_end_message),
+             "End of transaction 0x%04x in state %d, return to idle state",
+             expected_slave_serial, TR_SLAVE_COMMAND_FORWARDING_TO_DCPD);
+    mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG, expected_end_message);
+
+    cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
+                                   expected_spi_fd, &process_data->transaction,
+                                   &process_data->rldata));
+
+    cppcut_assert_equal(TR_IDLE, process_data->transaction.state);
+    std::vector<uint8_t> wrapped_write_command;
+    wrap_data_into_protocol(wrapped_write_command, 'c', 0, expected_slave_serial,
+                            write_command.begin() + 1, write_command.size() - 1);
+    cut_assert_equal_memory(wrapped_write_command.data(), wrapped_write_command.size(),
+                            os_write_buffer.data(), os_write_buffer.size());
+    os_write_buffer.clear();
+    mock_messages->check();
+    mock_gpio->check();
+    poll_results.check();
+
+    expect_no_more_actions();
 }
 
 }
