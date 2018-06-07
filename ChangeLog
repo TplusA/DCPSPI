@@ -1,3 +1,43 @@
+2018-07-12  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.7 released.
+
+	* Statistics: Overall program statistics are gathered now (if
+	  requested) and can be dumped to the log. The program measures the
+	  time spent in various parts of the program, and gathers I/O
+	  statistics. Statistics can be reset at any time, and a nice report
+	  can be dumped to the log when needed.
+
+	  By default, statistics are *not* gathered because overflowing the
+	  statistics counters will generate tons of warnings in the log. To
+	  change this default, the command line option --stats may be used.
+	  This way, statistics can be gathered during the boot process as
+	  well.
+
+	  We still use UNIX signals to control dcpspi, so here is a bunch of
+	  new signals now handled by dcpspi:
+	  - SIGRTMIN+9  - Stop gathering statistics.
+	  - SIGRTMIN+10 - Resume gathering statistics.
+	  - SIGRTMIN+11 - Dump statistics to log.
+	  - SIGRTMIN+12 - Dump statistics to log and reset all figures.
+
+	* Debugging: Emit a log message in case the SPI slave has deasserted
+	  the request pin before the corresponding transaction is about to be
+	  processed. This can happen in case the request pin is deasserted and
+	  then asserted again while a transaction is in progress (creating a
+	  pending transaction), and then the pin is deasserted before the
+	  pending transaction is started to be processed (possibly due to a
+	  timeout or other circumstances in the SPI slave).
+
+	* Debugging: Improved log message in case the SPI slave asserts the
+	  request pin for a "long" time. The confusing message "Ignoring data
+	  from DCPD until slave deasserts request pin" is now a pair of
+	  messages: "Waiting for slave to deassert the request pin" and
+	  "Slave has deasserted the request pin".
+
+	* Misc: Configure script attempts to enable C++11 mode for C++
+	  compiler (for unit tests).
+
 2018-03-08  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.6 released. Functionality unchanged, only build system is
