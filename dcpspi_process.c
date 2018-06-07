@@ -808,6 +808,12 @@ static bool process_request_line(struct dcp_transaction *transaction,
 
           case REQUEST_LINE_DEASSERTED:
           case REQUEST_LINE_DEASSERTED_AND_ASSERTED:
+            if(transaction->state == TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT)
+                msg_info("Slave has deasserted the request pin%s",
+                         changes == REQUEST_LINE_DEASSERTED_AND_ASSERTED
+                         ? " (and has asserted it again)"
+                         : "");
+
             switch(transaction->request_state)
             {
               case REQSTATE_LOCKED:
@@ -867,7 +873,7 @@ static bool wait_for_events(const struct dcp_transaction *const transaction,
 {
     if(transaction->state == TR_SLAVE_COMMAND_WAIT_FOR_REQUEST_DEASSERT)
     {
-        msg_info("Ignoring data from DCPD until slave deasserts request pin");
+        msg_info("Waiting for slave to deassert the request pin");
         fifo_in_fd = -1;
     }
 

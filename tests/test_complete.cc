@@ -1363,8 +1363,8 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
 
     /* nice, now the SPI slave releases its request line, a bit slow today */
     cppcut_assert_equal(size_t(13), wrapped_interrupting_slave_command.size());
-    mock_messages->expect_msg_info_formatted(
-        "Ignoring data from DCPD until slave deasserts request pin");
+    mock_messages->expect_msg_info_formatted("Waiting for slave to deassert the request pin");
+    mock_messages->expect_msg_info_formatted("Slave has deasserted the request pin");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 9, serial 0x0001, lock state 2, pending size 0, flush pos 13");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
