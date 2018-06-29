@@ -39,7 +39,7 @@ dcpspi_SOURCES = \
 
 AM_CFLAGS = $(CWARNINGS)
 
-noinst_LTLIBRARIES = libspi.la libdcpspi.la
+noinst_LTLIBRARIES = libspi.la libdcpspi.la libstatistics.la
 
 dcpspi_LDADD = $(noinst_LTLIBRARIES)
 
@@ -50,6 +50,9 @@ libdcpspi_la_SOURCES = \
     dcpspi_process.c dcpspi_process.h dcpdefs.h \
     named_pipe.h gpio.h spi.h os.h messages.h
 libdcpspi_la_CFLAGS = $(AM_CFLAGS)
+
+libstatistics_la_SOURCES = statistics.c statistics.h messages.h os.h
+libstatistics_la_CFLAGS = $(AM_CFLAGS)
 
 BUILT_SOURCES = versioninfo.h
 

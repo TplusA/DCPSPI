@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+# Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
 #
 # This file is part of DCPSPI.
 #
@@ -36,7 +36,7 @@ AM_CXXFLAGS = $(CXXWARNINGS)
 
 LIBS += $(CPPCUTTER_LIBS)
 
-check_LTLIBRARIES = test_spi.la test_complete.la
+check_LTLIBRARIES = test_spi.la test_complete.la test_statistics.la
 
 test_spi_la_SOURCES = \
     test_spi.cc \
@@ -58,6 +58,15 @@ test_complete_la_SOURCES = \
 test_complete_la_LIBADD = ../libdcpspi.la ../libspi.la
 test_complete_la_CFLAGS = $(AM_CFLAGS)
 test_complete_la_CXXFLAGS = $(AM_CXXFLAGS)
+
+test_statistics_la_SOURCES = \
+    test_statistics.cc \
+    mock_os.hh mock_os.cc \
+    mock_messages.hh mock_messages.cc \
+    mock_expectation.hh
+test_statistics_la_LIBADD = ../libstatistics.la
+test_statistics_la_CFLAGS = $(AM_CFLAGS)
+test_statistics_la_CXXFLAGS = $(AM_CXXFLAGS)
 
 CLEANFILES = test_report.xml test_report_junit.xml valgrind.xml
 
