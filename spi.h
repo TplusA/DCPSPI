@@ -23,6 +23,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
+#include "statistics.h"
+
 enum SpiSendResult
 {
     SPI_SEND_RESULT_OK,
@@ -69,6 +71,9 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *     The maximum amount of time to wait for the slave to get ready in
  *     milliseconds.
  *
+ * \param io
+ *     Structure for gathering I/O statistics.
+ *
  * \retval #SPI_SEND_RESULT_OK         On success.
  * \retval #SPI_SEND_RESULT_FAILURE    On unrecoverable, hard error.
  * \retval #SPI_SEND_RESULT_TIMEOUT    On timeout.
@@ -76,7 +81,8 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *                                     transaction).
  */
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms);
+                                   unsigned int timeout_ms,
+                                   struct stats_io *io);
 
 /*!
  * Fill buffer from SPI, but remove 0xff NOP bytes.
@@ -93,7 +99,7 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
  * \returns Number of non-NOP bytes, or -1 on error.
  */
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
-                        unsigned int timeout_ms);
+                        unsigned int timeout_ms, struct stats_io *io);
 
 /*!
  * Check if there could be another packet in the internal receive buffer.

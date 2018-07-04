@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -143,7 +143,7 @@ static void ensure_empty_read_buffer()
 
     const ssize_t bytes =
         spi_read_buffer(expected_spi_fd, should_remain_untouched,
-                        sizeof(should_remain_untouched), 0);
+                        sizeof(should_remain_untouched), 0, nullptr);
 
     if(bytes > 0)
     {
@@ -178,7 +178,8 @@ void test_read_from_spi()
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500));
+                                        buffer.data(), buffer.size(), 500,
+                                        nullptr));
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
                             buffer.data(), buffer.size());
@@ -222,7 +223,8 @@ void test_read_escaped_data_from_spi()
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500));
+                                        buffer.data(), buffer.size(), 500,
+                                        nullptr));
 
     static const std::array<uint8_t, 11> expected_content =
     {
@@ -261,7 +263,8 @@ void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escap
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500));
+                                        buffer.data(), buffer.size(), 500,
+                                        nullptr));
 
     std::array<uint8_t, 2 * read_from_slave_spi_transfer_size - 1> expected_content = {0};
     expected_content[read_from_slave_spi_transfer_size - 1] = UINT8_MAX;
@@ -304,7 +307,8 @@ void test_write_to_spi()
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
-                                        expected_content.size(), 500));
+                                        expected_content.size(), 500,
+                                        nullptr));
 }
 
 /*!\test
@@ -330,7 +334,7 @@ void test_write_escaped_data_to_spi()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
-                                        raw_data.size(), 500));
+                                        raw_data.size(), 500, nullptr));
 }
 
 /*!\test
@@ -476,7 +480,8 @@ void test_timeout_without_any_read_is_not_possible()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000));
+                                        buffer.data(), buffer.size(), 1000,
+                                        nullptr));
     expect_buffer_content(buffer, 0x55);
 }
 
@@ -517,7 +522,8 @@ void test_read_timeout_is_precisely_measured()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 800));
+                                        buffer.data(), buffer.size(), 800,
+                                        nullptr));
     expect_buffer_content(buffer, 0x55);
 }
 
@@ -568,7 +574,8 @@ void test_timeout_overflow_in_struct_timespec()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1));
+                                        buffer.data(), buffer.size(), 1,
+                                        nullptr));
 }
 
 /*!\test
@@ -617,7 +624,8 @@ void test_long_timeout()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 3000));
+                                        buffer.data(), buffer.size(), 3000,
+                                        nullptr));
 }
 
 /*!\test
@@ -676,7 +684,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
                             spi_read_buffer(expected_spi_fd,
                                             command_header_buffer.data(),
                                             command_header_buffer.size(),
-                                            10));
+                                            10, nullptr));
         cut_assert_equal_memory(req.data(),
                                 command_header_buffer.size(),
                                 command_header_buffer.data(),
@@ -692,7 +700,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
                             spi_read_buffer(expected_spi_fd,
                                             drcp_command_buffer.data(),
                                             drcp_command_buffer.size(),
-                                            10));
+                                            10, nullptr));
         cut_assert_equal_memory(req.data() + command_header_buffer.size(),
                                 drcp_command_buffer.size(),
                                 drcp_command_buffer.data(),
@@ -734,7 +742,8 @@ void test_send_timeout_without_any_write_is_not_possible()
 
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000));
+                                        buffer.data(), buffer.size(), 1000,
+                                        nullptr));
 }
 
 /*!\test
@@ -780,7 +789,8 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 100));
+                                        buffer.data(), buffer.size(), 100,
+                                        nullptr));
 }
 
 /*!\test
@@ -829,7 +839,7 @@ void test_send_to_slave_may_fail_due_to_timeout()
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
                                         not_sent_data.data(),
-                                        not_sent_data.size(), 100));
+                                        not_sent_data.size(), 100, nullptr));
 }
 
 /*!\test
@@ -860,7 +870,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -870,7 +880,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[0]));
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[1]));
@@ -903,7 +913,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 5> second_fragment = { 0x66, 0x77, 0x88, 0xaa, 0xfe, };
@@ -925,7 +935,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -958,7 +968,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x33, 0x09, 0x1f, };
@@ -980,7 +990,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1013,7 +1023,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* slave sends more data to complete its command: the 0x01 is escaped */
     static const std::array<uint8_t, 4> second_fragment = { 0x01, 0x80, 0x71, 0xba, };
@@ -1036,7 +1046,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1070,7 +1080,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x01, 0x02, 0x03, };
@@ -1092,7 +1102,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1125,7 +1135,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -1135,7 +1145,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cppcut_assert_equal(0x3a, static_cast<int>(receive_buffer[0]));
 
@@ -1167,7 +1177,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000));
+                                        1000, nullptr));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -1177,7 +1187,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500));
+                                        receive_buffer.size(), 500, nullptr));
 
     cppcut_assert_equal(0xc5, static_cast<int>(receive_buffer[0]));
 

@@ -57,12 +57,131 @@ static void log_version_info(void)
               VCS_TAG, VCS_TICK, VCS_DATE);
 }
 
+static double compute_percentage(double frac, uint64_t total)
+{
+    return (total > 0) ? (frac / (double)total) * 100.0 : 0.0;
+}
+
+static double compute_io_ratio(const struct stats_io *io)
+{
+    return (io->blocked.t_usec > 0)
+        ? (double)io->bytes_transferred /
+          (((double)io->blocked.t_usec) / 1000.0 / 1000.0)
+        : 0.0;
+}
+
+static void dump_statistics(const struct program_statistics *stats)
+{
+    const uint64_t total_us =
+        stats->wait_for_events.t_usec + stats->busy_unspecific.t_usec +
+        stats->busy_gpio.t_usec + stats->busy_transaction.t_usec;
+
+    msg_info("*** Statistics for last %" PRIu64 " us (%0.2f s)  ***",
+             total_us, (double)total_us / 1000.0 / 1000.0);
+    msg_info("Events wait (idle) - %10" PRIu64 " us",
+             stats->wait_for_events.t_usec);
+    msg_info("Idle ratio         - %3.2f%%",
+             compute_percentage(stats->wait_for_events.t_usec, total_us));
+    msg_info("Busy unspecific    - %10" PRIu64 " us",
+             stats->busy_unspecific.t_usec);
+    msg_info("Busy GPIO          - %10" PRIu64 " us",
+             stats->busy_gpio.t_usec);
+    msg_info("Busy transaction   - %10" PRIu64 " us",
+             stats->busy_transaction.t_usec);
+    msg_info("Busy ratio         - %3.2f%%",
+             compute_percentage((double)stats->busy_unspecific.t_usec +
+                                (double)stats->busy_gpio.t_usec +
+                                (double)stats->busy_transaction.t_usec,
+                                total_us));
+    msg_info("I/O SPI            - %10" PRIu64 " us, "
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             stats->spi_transfers.blocked.t_usec,
+             stats->spi_transfers.bytes_transferred,
+             stats->spi_transfers.ops.count,
+             stats->spi_transfers.failures.count,
+             compute_io_ratio(&stats->spi_transfers));
+    msg_info("I/O from DCPD      - %10" PRIu64 " us, "
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             stats->dcpd_reads.blocked.t_usec,
+             stats->dcpd_reads.bytes_transferred,
+             stats->dcpd_reads.ops.count,
+             stats->dcpd_reads.failures.count,
+             compute_io_ratio(&stats->dcpd_reads));
+    msg_info("I/O to DCPD        - %10" PRIu64 " us, "
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             stats->dcpd_writes.blocked.t_usec,
+             stats->dcpd_writes.bytes_transferred,
+             stats->dcpd_writes.ops.count,
+             stats->dcpd_writes.failures.count,
+             compute_io_ratio(&stats->dcpd_writes));
+    msg_info("I/O wait ratio     - %3.2f%%",
+             compute_percentage((double)stats->spi_transfers.blocked.t_usec +
+                                (double)stats->dcpd_reads.blocked.t_usec +
+                                (double)stats->dcpd_writes.blocked.t_usec,
+                                total_us));
+}
+
 /*!
  * Global flag that gets cleared in the SIGTERM signal handler.
  *
  * For clean shutdown.
  */
 static volatile bool keep_running = true;
+
+/*!
+ * More globals which control statistics.
+ *
+ * These are set in a signal handler, so their use in non-signal contexts
+ * requires blocking signals.
+ */
+static volatile struct statistics_control
+{
+    bool is_anything_requested;
+
+    bool enable_statistics_requested;
+    bool enable_statistics_flag;
+    bool dump_requested;
+    bool reset_requested;
+}
+statistics_control;
+
+static void handle_statistics_requests(const sigset_t *mask)
+{
+    if(!statistics_control.is_anything_requested)
+        return;
+
+    if(sigprocmask(SIG_BLOCK, mask, NULL) < 0)
+    {
+        msg_error(errno, LOG_ERR, "Failed blocking signals");
+        return;
+    }
+
+    if(statistics_control.enable_statistics_requested)
+    {
+        msg_info("%sable gathering of statistics",
+                 statistics_control.enable_statistics_flag ? "En" : "Dis");
+        dcpspi_statistics_enable(statistics_control.enable_statistics_flag);
+        statistics_control.enable_statistics_requested = false;
+    }
+
+    if(statistics_control.dump_requested)
+    {
+        dump_statistics(dcpspi_statistics_get());
+        statistics_control.dump_requested = false;
+    }
+
+    if(statistics_control.reset_requested)
+    {
+        msg_info("Resetting statistics");
+        dcpspi_statistics_reset();
+        statistics_control.reset_requested = false;
+    }
+
+    statistics_control.is_anything_requested = false;
+
+    if(sigprocmask(SIG_UNBLOCK, mask, NULL) < 0)
+        msg_error(errno, LOG_CRIT, "Failed resetting signal mask");
+}
 
 /*!
  * Copy data back and forth.
@@ -139,13 +258,23 @@ static void main_loop(const int fifo_in_fd, const int fifo_out_fd,
         .previous_gpio_state = (gpio != NULL) ? gpio_is_active(gpio) : false,
     };
 
+    const int base_signal = SIGRTMIN + MESSAGE_LEVEL_MAX - MESSAGE_LEVEL_MIN + 2;
+    sigset_t statistics_signal_mask;
+    sigemptyset(&statistics_signal_mask);
+    sigaddset(&statistics_signal_mask, base_signal + 2);
+    sigaddset(&statistics_signal_mask, base_signal + 3);
+    sigaddset(&statistics_signal_mask, base_signal + 4);
+    sigaddset(&statistics_signal_mask, base_signal + 5);
+
     while(keep_running &&
           dcpspi_process(fifo_in_fd, fifo_out_fd, spi_fd,
                          &transaction, &rldata))
-        ;
+    {
+        handle_statistics_requests(&statistics_signal_mask);
+    }
 }
 
-static void toggle_traffic_logs(unsigned int relative_signum)
+static void extra_signals(unsigned int relative_signum)
 {
     switch(relative_signum)
     {
@@ -155,6 +284,29 @@ static void toggle_traffic_logs(unsigned int relative_signum)
 
       case 1:
         spi_enable_traffic_dump();
+        break;
+
+      case 2:
+        statistics_control.is_anything_requested = true;
+        statistics_control.enable_statistics_requested = true;
+        statistics_control.enable_statistics_flag = false;
+        break;
+
+      case 3:
+        statistics_control.is_anything_requested = true;
+        statistics_control.enable_statistics_requested = true;
+        statistics_control.enable_statistics_flag = true;
+        break;
+
+      case 4:
+        statistics_control.is_anything_requested = true;
+        statistics_control.dump_requested = true;
+        break;
+
+      case 5:
+        statistics_control.is_anything_requested = true;
+        statistics_control.dump_requested = true;
+        statistics_control.reset_requested = true;
         break;
 
       default:
@@ -185,8 +337,14 @@ static int setup(const struct parameters *parameters,
     msg_enable_syslog(!parameters->run_in_foreground);
     msg_set_verbose_level(parameters->verbose_level);
     msg_install_debug_level_signals();
-    msg_install_extra_handler(0, toggle_traffic_logs);
-    msg_install_extra_handler(1, toggle_traffic_logs);
+    msg_install_extra_handler(0, extra_signals);
+    msg_install_extra_handler(1, extra_signals);
+    msg_install_extra_handler(2, extra_signals);
+    msg_install_extra_handler(3, extra_signals);
+    msg_install_extra_handler(4, extra_signals);
+    msg_install_extra_handler(5, extra_signals);
+
+    dcpspi_statistics_enable(true);
 
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);

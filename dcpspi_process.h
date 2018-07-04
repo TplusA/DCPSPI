@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2016, 2018  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -22,6 +22,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+#include "statistics.h"
 
 /*!
  * Current state of the DCP transaction.
@@ -191,6 +193,18 @@ struct slave_request_and_lock_data
     bool previous_gpio_state;
 };
 
+struct program_statistics
+{
+    bool is_enabled;
+    struct stats_context busy_unspecific;
+    struct stats_context busy_gpio;
+    struct stats_context busy_transaction;
+    struct stats_context wait_for_events;
+    struct stats_io spi_transfers;
+    struct stats_io dcpd_reads;
+    struct stats_io dcpd_writes;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -199,6 +213,10 @@ bool reset_transaction_struct(struct dcp_transaction *transaction,
                               bool is_initial_reset);
 
 void dcpspi_init(void);
+
+void dcpspi_statistics_reset(void);
+const struct program_statistics *dcpspi_statistics_get(void);
+bool dcpspi_statistics_enable(bool enable);
 
 bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
                     const int spi_fd,

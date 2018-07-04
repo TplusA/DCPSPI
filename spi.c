@@ -169,7 +169,7 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
 static enum SpiSendResult
 wait_for_spi_slave(int fd, unsigned int timeout_ms,
                    uint8_t *const buffer, const size_t buffer_size,
-                   bool *have_significant_data)
+                   bool *have_significant_data, struct stats_io *io)
 {
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -189,16 +189,21 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
     while(1)
     {
+        struct stats_context *prev_ctx = stats_io_begin(io);
+
         int ret =
             spi_hw_do_transfer(fd, spi_transfer,
                                sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
         if(ret < 0)
         {
+            stats_io_end(io, prev_ctx, 1, 0);
             msg_error(errno, LOG_EMERG,
                       "Failed waiting for slave device on fd %d", fd);
             return SPI_SEND_RESULT_FAILURE;
         }
+
+        stats_io_end(io, prev_ctx, 0, spi_transfer[0].len);
 
         hexdump_to_log(hexdump_traffic_level, buffer, buffer_size, "Received");
 
@@ -264,7 +269,7 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
 static struct spi_input_buffer global_spi_input_buffer;
 
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms)
+                                   unsigned int timeout_ms, struct stats_io *io)
 {
     if(fd < 0)
     {
@@ -277,7 +282,7 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     const enum SpiSendResult wait_result =
         wait_for_spi_slave(fd, timeout_ms,
                            poll_bytes_buffer, sizeof(poll_bytes_buffer),
-                           &have_significant_data);
+                           &have_significant_data, io);
 
     if(wait_result != SPI_SEND_RESULT_OK)
     {
@@ -309,18 +314,22 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
         },
     };
 
+    struct stats_context *prev_ctx = stats_io_begin(io);
+
     const int ret =
         spi_hw_do_transfer(fd, spi_transfer,
                            sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {
+        stats_io_end(io, prev_ctx, 1, 0);
         msg_error(errno, LOG_EMERG,
                   "Failed writing %zu bytes to SPI device fd %d", length, fd);
         return SPI_SEND_RESULT_FAILURE;
     }
     else
     {
+        stats_io_end(io, prev_ctx, 0, spi_transfer[0].len);
         hexdump_to_log(hexdump_traffic_level, buffer, length, "Sent");
         return SPI_SEND_RESULT_OK;
     }
@@ -359,7 +368,8 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *
  * The buffer size must be at least as big as the #spi_dummy_bytes array.
  */
-static ssize_t read_chunk(int fd, struct spi_input_buffer *const in)
+static ssize_t read_chunk(int fd, struct spi_input_buffer *const in,
+                          struct stats_io *io)
 {
     const struct spi_ioc_transfer spi_transfer[] =
     {
@@ -372,17 +382,22 @@ static ssize_t read_chunk(int fd, struct spi_input_buffer *const in)
         },
     };
 
+    struct stats_context *prev_ctx = stats_io_begin(io);
+
     int ret =
         spi_hw_do_transfer(fd, spi_transfer,
                            sizeof(spi_transfer) / sizeof(spi_transfer[0]));
 
     if(ret < 0)
     {
+        stats_io_end(io, prev_ctx, 1, 0);
         msg_error(errno, LOG_EMERG,
                   "Failed reading %u bytes from SPI device fd %d",
                   spi_transfer[0].len, fd);
         return -1;
     }
+
+    stats_io_end(io, prev_ctx, 0, spi_transfer[0].len);
 
     hexdump_to_log(hexdump_traffic_level,
                    in->buffer, sizeof(spi_dummy_bytes), "Received");
@@ -416,7 +431,7 @@ static size_t consume_from_buffer(struct spi_input_buffer *const restrict src,
 }
 
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
-                        unsigned int timeout_ms)
+                        unsigned int timeout_ms, struct stats_io *io)
 {
     bool reset_timeout = false;
     struct timespec expiration_time;
@@ -434,7 +449,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
          * removed); keep them around for potential extra bytes that have been
          * read, but were not requested by the caller (we cannot "unread" on
          * SPI) */
-        const ssize_t chunk_size = read_chunk(fd, &global_spi_input_buffer);
+        const ssize_t chunk_size = read_chunk(fd, &global_spi_input_buffer, io);
 
         /* error out in case of hard communication error and return what got so
          * far */

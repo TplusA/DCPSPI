@@ -60,8 +60,12 @@ enum RequestLineChanges
 static struct
 {
     uint16_t next_dcpsync_serial;
+    struct program_statistics statistics;
 }
 dcpspi_globals;
+
+#define STATISTICS_STRUCT(S) \
+    (dcpspi_globals.statistics.is_enabled ? &dcpspi_globals.statistics.S : NULL)
 
 static uint16_t mk_serial(void)
 {
@@ -77,6 +81,30 @@ static uint16_t mk_serial(void)
 void dcpspi_init(void)
 {
     dcpspi_globals.next_dcpsync_serial = 0;
+    dcpspi_statistics_reset();
+}
+
+void dcpspi_statistics_reset(void)
+{
+    stats_context_reset(&dcpspi_globals.statistics.busy_unspecific);
+    stats_context_reset(&dcpspi_globals.statistics.busy_gpio);
+    stats_context_reset(&dcpspi_globals.statistics.busy_transaction);
+    stats_context_reset(&dcpspi_globals.statistics.wait_for_events);
+    stats_io_reset(&dcpspi_globals.statistics.spi_transfers);
+    stats_io_reset(&dcpspi_globals.statistics.dcpd_reads);
+    stats_io_reset(&dcpspi_globals.statistics.dcpd_writes);
+}
+
+const struct program_statistics *dcpspi_statistics_get(void)
+{
+    return &dcpspi_globals.statistics;
+}
+
+bool dcpspi_statistics_enable(bool enable)
+{
+    const bool result = dcpspi_globals.statistics.is_enabled;
+    dcpspi_globals.statistics.is_enabled = enable;
+    return result;
 }
 
 /*!
@@ -107,12 +135,17 @@ static bool is_buffer_full(const struct buffer *buffer)
     return buffer->pos >= buffer->size;
 }
 
-static int fill_buffer_from_fd(struct buffer *buffer, size_t count, int fd)
+static int fill_buffer_from_fd(struct buffer *buffer, size_t count, int fd,
+                               struct stats_io *io)
 {
     if(count == 0)
         return 0;
 
+    struct stats_context *prev_ctx = stats_io_begin(io);
+
     ssize_t len = os_read(fd, buffer->buffer + buffer->pos, count);
+
+    stats_io_end(io, prev_ctx, len <= 0 ? 1 : 0, len >= 0 ? len : 0);
 
     if(len > 0)
     {
@@ -135,11 +168,16 @@ static int fill_buffer_from_fd(struct buffer *buffer, size_t count, int fd)
 }
 
 static ssize_t send_buffer_to_fd(struct buffer *buffer,
-                                 size_t offset, size_t count, int fd)
+                                 size_t offset, size_t count, int fd,
+                                 struct stats_io *io)
 {
     errno = 0;
 
+    struct stats_context *prev_ctx = stats_io_begin(io);
+
     ssize_t len = os_write(fd, buffer->buffer + offset, count);
+
+    stats_io_end(io, prev_ctx, len <= 0 ? 1 : 0, len >= 0 ? len : 0);
 
     if(len > 0)
         return len;
@@ -299,7 +337,8 @@ static void send_packet_accepted_message(struct buffer *buffer,
 {
     msg_vinfo(MESSAGE_LEVEL_TRACE, "ACK 0x%04x", serial);
     fill_dcpsync_header_generic(buffer->buffer, 'a', 0, serial, 0);
-    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
+    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd,
+                      STATISTICS_STRUCT(dcpd_writes));
 }
 
 static void send_packet_rejected_message(struct buffer *buffer,
@@ -311,7 +350,8 @@ static void send_packet_rejected_message(struct buffer *buffer,
         msg_vinfo(MESSAGE_LEVEL_TRACE, "DROP 0x%04x", serial);
 
     fill_dcpsync_header_generic(buffer->buffer, 'n', ttl, serial, 0);
-    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd);
+    send_buffer_to_fd(buffer, 0, DCPSYNC_HEADER_SIZE, fd,
+                      STATISTICS_STRUCT(dcpd_writes));
 }
 
 static void send_packet_dropped_message(struct buffer *buffer,
@@ -377,8 +417,10 @@ static bool process_transaction_receive_data(struct dcp_transaction *transaction
         (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
         ? spi_read_buffer(spi_fd,
                           transaction->dcp_buffer.buffer + transaction->dcp_buffer.pos,
-                          read_size, spi_timeout_ms)
-        : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd);
+                          read_size, spi_timeout_ms,
+                          STATISTICS_STRUCT(spi_transfers))
+        : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd,
+                              STATISTICS_STRUCT(dcpd_reads));
 
     if(bytes_read < 0)
     {
@@ -485,7 +527,8 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
       case TR_MASTER_COMMAND_RECEIVING_HEADER_FROM_DCPD:
         if(fill_buffer_from_fd(&transaction->dcp_buffer,
                                (DCPSYNC_HEADER_SIZE + DCP_HEADER_SIZE) - transaction->dcp_buffer.pos,
-                               fifo_in_fd) < 0)
+                               fifo_in_fd,
+                               STATISTICS_STRUCT(dcpd_reads)) < 0)
         {
             msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
                       tr_log_prefix(transaction->state));
@@ -569,7 +612,8 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
         const enum SpiSendResult ret = is_dummy_header
             ? SPI_SEND_RESULT_OK
             : spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                              transaction->spi_buffer.pos, spi_timeout_ms);
+                              transaction->spi_buffer.pos, spi_timeout_ms,
+                              STATISTICS_STRUCT(spi_transfers));
         switch(ret)
         {
           case SPI_SEND_RESULT_OK:
@@ -607,7 +651,8 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
       case TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE:
         if(spi_read_buffer(spi_fd,
                            transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE,
-                           DCP_HEADER_SIZE, spi_timeout_ms) < DCP_HEADER_SIZE)
+                           DCP_HEADER_SIZE, spi_timeout_ms,
+                           STATISTICS_STRUCT(spi_transfers)) < DCP_HEADER_SIZE)
         {
             retval = reset_transaction(transaction);
             break;
@@ -677,7 +722,8 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
                 send_buffer_to_fd(&transaction->dcp_buffer,
                                   transaction->flush_to_dcpd_buffer_pos,
                                   transaction->dcp_buffer.pos - transaction->flush_to_dcpd_buffer_pos,
-                                  fifo_out_fd);
+                                  fifo_out_fd,
+                                  STATISTICS_STRUCT(dcpd_writes));
 
             if(sent_bytes < 0)
             {
@@ -709,10 +755,15 @@ static inline void process_transaction(struct dcp_transaction *transaction,
                                        int fifo_in_fd, int fifo_out_fd,
                                        int spi_fd, unsigned int spi_timeout_ms)
 {
+    struct stats_context *prev_ctx =
+        stats_context_switch(STATISTICS_STRUCT(busy_transaction));
+
     while(do_process_transaction(transaction, rldata,
                                  fifo_in_fd, fifo_out_fd,
                                  spi_fd, spi_timeout_ms))
         ;
+
+    stats_context_switch(prev_ctx);
 }
 
 static enum RequestLineChanges determine_gpio_changes(bool current_state,
@@ -737,6 +788,9 @@ static bool process_request_line(struct dcp_transaction *transaction,
                                  int fifo_in_fd, int fifo_out_fd,
                                  int spi_fd, unsigned int spi_timeout_ms)
 {
+    struct stats_context *prev_ctx =
+        stats_context_switch(STATISTICS_STRUCT(busy_gpio));
+
     bool need_more_processing = false;
     bool current_gpio_state = gpio_is_active(rldata->gpio);
 
@@ -869,6 +923,8 @@ static bool process_request_line(struct dcp_transaction *transaction,
         }
     }
 
+    stats_context_switch(prev_ctx);
+
     return need_more_processing;
 }
 
@@ -890,7 +946,12 @@ static bool wait_for_events(const struct dcp_transaction *const transaction,
     fds[1].fd = fifo_in_fd;
     fds[1].events = POLLIN;
 
+    struct stats_context *prev_ctx =
+        stats_context_switch(STATISTICS_STRUCT(wait_for_events));
+
     const int ret = os_poll(fds, EVENT_FD_COUNT, is_quick_check ? 0 : -1);
+
+    stats_context_switch(prev_ctx);
 
     if(ret > 0)
     {
@@ -965,6 +1026,8 @@ bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
                     struct dcp_transaction *const transaction,
                     struct slave_request_and_lock_data *const rldata)
 {
+    stats_context_switch(STATISTICS_STRUCT(busy_unspecific));
+
     static const unsigned int spi_timeout_ms = 1000;
 
     if(rldata->is_running_for_real)
