@@ -26,6 +26,7 @@
 struct stats_context
 {
     uint64_t t_usec;
+    uint64_t ti_usec;
 
     struct timespec context_entered;  /* private */
 };
@@ -51,6 +52,8 @@ void stats_init(void);
 
 void stats_context_reset(struct stats_context *ctx);
 struct stats_context *stats_context_switch(struct stats_context *ctx);
+struct stats_context *
+stats_context_switch_to_parent(struct stats_context *parent_ctx);
 
 void stats_event_counter_reset(struct stats_event_counter *cnt);
 void stats_event(struct stats_event_counter *cnt);

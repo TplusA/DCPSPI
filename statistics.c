@@ -127,6 +127,20 @@ static bool add_to_time(struct stats_context *ctx, uint64_t usec)
     return false;
 }
 
+static bool add_to_itime(struct stats_context *ctx, uint64_t usec)
+{
+    if(ctx->ti_usec <= UINT64_MAX - usec)
+    {
+        ctx->ti_usec += usec;
+        return true;
+    }
+
+    msg_error(EOVERFLOW, LOG_WARNING, "Cumulative inclusive time overflow");
+    ctx->ti_usec = UINT64_MAX;
+
+    return false;
+}
+
 static struct stats_context *global_current_content;
 
 void stats_init(void)
@@ -137,6 +151,7 @@ void stats_init(void)
 void stats_context_reset(struct stats_context *const ctx)
 {
     ctx->t_usec = 0;
+    ctx->ti_usec = 0;
 }
 
 struct stats_context *stats_context_switch(struct stats_context *const ctx)
@@ -157,8 +172,12 @@ struct stats_context *stats_context_switch(struct stats_context *const ctx)
     if(temp == 0)
     {
         if(prev != NULL)
-            add_to_time(prev, compute_delta_usec(&prev->context_entered,
-                                                 &ctx->context_entered));
+        {
+            const uint64_t delta = compute_delta_usec(&prev->context_entered,
+                                                      &ctx->context_entered);
+            add_to_time(prev, delta);
+            add_to_itime(prev, delta);
+        }
     }
     else
     {
@@ -168,6 +187,17 @@ struct stats_context *stats_context_switch(struct stats_context *const ctx)
     }
 
     return prev;
+}
+
+struct stats_context *
+stats_context_switch_to_parent(struct stats_context *parent_ctx)
+{
+    const uint64_t prev_time = global_current_content->t_usec;
+    struct stats_context *child_ctx = stats_context_switch(parent_ctx);
+
+    add_to_itime(parent_ctx, child_ctx->t_usec - prev_time);
+
+    return child_ctx;
 }
 
 void stats_event_counter_reset(struct stats_event_counter *const cnt)
@@ -231,7 +261,7 @@ void stats_io_end(struct stats_io *const io,
             io->bytes_transferred = SIZE_MAX;
     }
 
-    stats_context_switch(previous_ctx);
+    stats_context_switch_to_parent(previous_ctx);
 
     errno = save_errno;
 }

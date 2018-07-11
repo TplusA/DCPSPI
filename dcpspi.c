@@ -86,34 +86,40 @@ static void dump_statistics(const struct program_statistics *stats)
              stats->busy_unspecific.t_usec);
     msg_info("Busy GPIO          - %10" PRIu64 " us",
              stats->busy_gpio.t_usec);
-    msg_info("Busy transaction   - %10" PRIu64 " us",
-             stats->busy_transaction.t_usec);
+    msg_info("Busy transaction   - %10" PRIu64 " us, %10" PRIu64 " us including I/O",
+             stats->busy_transaction.t_usec, stats->busy_transaction.ti_usec);
     msg_info("Busy ratio         - %3.2f%%",
              compute_percentage((double)stats->busy_unspecific.t_usec +
                                 (double)stats->busy_gpio.t_usec +
                                 (double)stats->busy_transaction.t_usec,
                                 total_us));
     msg_info("I/O SPI            - %10" PRIu64 " us, "
-             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s - %3.2f%%",
              stats->spi_transfers.blocked.t_usec,
              stats->spi_transfers.bytes_transferred,
              stats->spi_transfers.ops.count,
              stats->spi_transfers.failures.count,
-             compute_io_ratio(&stats->spi_transfers));
+             compute_io_ratio(&stats->spi_transfers),
+             compute_percentage(stats->spi_transfers.blocked.t_usec,
+                                stats->busy_transaction.ti_usec));
     msg_info("I/O from DCPD      - %10" PRIu64 " us, "
-             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s - %3.2f%%",
              stats->dcpd_reads.blocked.t_usec,
              stats->dcpd_reads.bytes_transferred,
              stats->dcpd_reads.ops.count,
              stats->dcpd_reads.failures.count,
-             compute_io_ratio(&stats->dcpd_reads));
+             compute_io_ratio(&stats->dcpd_reads),
+             compute_percentage(stats->dcpd_reads.blocked.t_usec,
+                                stats->busy_transaction.ti_usec));
     msg_info("I/O to DCPD        - %10" PRIu64 " us, "
-             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s",
+             "%zu bytes in %" PRIu32 " ops, %" PRIu32 " failures - %0.2f B/s - %3.2f%%",
              stats->dcpd_writes.blocked.t_usec,
              stats->dcpd_writes.bytes_transferred,
              stats->dcpd_writes.ops.count,
              stats->dcpd_writes.failures.count,
-             compute_io_ratio(&stats->dcpd_writes));
+             compute_io_ratio(&stats->dcpd_writes),
+             compute_percentage(stats->dcpd_writes.blocked.t_usec,
+                                stats->busy_transaction.ti_usec));
     msg_info("I/O wait ratio     - %3.2f%%",
              compute_percentage((double)stats->spi_transfers.blocked.t_usec +
                                 (double)stats->dcpd_reads.blocked.t_usec +

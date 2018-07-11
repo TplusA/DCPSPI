@@ -80,6 +80,7 @@ void cut_teardown()
 void test_context_enter_first()
 {
     cppcut_assert_equal(uint64_t(0), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 
     static const struct timespec t = { .tv_sec = 300, .tv_nsec = 1234567, };
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -87,6 +88,7 @@ void test_context_enter_first()
     cppcut_assert_null(stats_context_switch(&ctx));
 
     cppcut_assert_equal(uint64_t(0), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 }
 
 /*!\test
@@ -95,6 +97,7 @@ void test_context_enter_first()
 void test_context_simple_switch()
 {
     cppcut_assert_equal(uint64_t(0), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 
     struct timespec t = { .tv_sec = 500, .tv_nsec = 20000, };
     mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
@@ -102,6 +105,7 @@ void test_context_simple_switch()
     cppcut_assert_null(stats_context_switch(&ctx));
 
     cppcut_assert_equal(uint64_t(0), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 
     struct stats_context next;
     stats_context_reset(&next);
@@ -113,6 +117,7 @@ void test_context_simple_switch()
     cppcut_assert_equal(&ctx, stats_context_switch(&next));
     cppcut_assert_equal(uint64_t(0), next.t_usec);
     cppcut_assert_equal(uint64_t(2U * 1000U * 1000U + 60U), ctx.t_usec);
+    cppcut_assert_equal(ctx.t_usec, ctx.ti_usec);
 }
 
 /*!\test
@@ -230,9 +235,59 @@ void test_chain_of_context_switches()
     cppcut_assert_equal(&c, stats_context_switch(&ctx));
     cppcut_assert_equal(uint64_t(958978), c.t_usec);
 
+    cppcut_assert_equal(a.ti_usec, a.t_usec);
+    cppcut_assert_equal(b.ti_usec, b.t_usec);
+    cppcut_assert_equal(c.ti_usec, c.t_usec);
+
     /* this should be 14013998628 ns -> 14013999 us, but we are off by 1 us due
      * to accumulated rounding errors */
     cppcut_assert_equal(uint64_t(14013998), a.t_usec + b.t_usec + c.t_usec + ctx.t_usec);
+}
+
+/*!\test
+ * Any two contexts may bear a parent/child relation, in which case it makes
+ * sense to accumulate time spent in the child in the parent as well.
+ *
+ * There are two fields for accumulated time: one for the time spent in the
+ * parent, and one for the time spent in the parent and its children. The
+ * parent/child relation is expressed ad hoc in code; there is no tree of
+ * contexts formally defined anywhere.
+ */
+void test_switch_from_parent_to_child_context_and_back()
+{
+    struct stats_context child;
+    stats_context_reset(&child);
+
+    struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    cppcut_assert_null(stats_context_switch(&ctx));
+
+    t.tv_sec = 7;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    cppcut_assert_equal(&ctx, stats_context_switch(&child));
+
+    t.tv_sec = 9;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    cppcut_assert_equal(&child, stats_context_switch_to_parent(&ctx));
+
+    cppcut_assert_equal(uint64_t(7000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(9000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(2000000), child.t_usec);
+    cppcut_assert_equal(uint64_t(2000000), child.ti_usec);
+
+    t.tv_sec = 10;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    cppcut_assert_equal(&ctx, stats_context_switch(&child));
+
+    t.tv_sec = 13;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    cppcut_assert_equal(&child, stats_context_switch_to_parent(&ctx));
+
+    cppcut_assert_equal(uint64_t(8000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(13000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(5000000), child.t_usec);
+    cppcut_assert_equal(uint64_t(5000000), child.ti_usec);
 }
 
 /*!
@@ -581,6 +636,54 @@ void test_io_stastistics()
     cppcut_assert_equal(uint32_t(2), io.failures.count);
     cppcut_assert_equal(uint64_t(1070723), io.blocked.t_usec);
     cppcut_assert_equal(size_t(734782), io.bytes_transferred);
+}
+
+/*!\test
+ * I/O times are also accumulated in the parent context's ti_usec field.
+ */
+void test_cumulated_times()
+{
+    struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+
+    cppcut_assert_null(stats_context_switch(&ctx));
+
+    struct stats_io io;
+    stats_io_reset(&io);
+
+    t.tv_sec = 1;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    struct stats_context *prev_ctx = stats_io_begin(&io);
+    cppcut_assert_equal(&ctx, prev_ctx);
+    cppcut_assert_equal(uint64_t(1000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(1000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(0), io.blocked.t_usec);
+    cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
+
+    t.tv_sec = 3;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    stats_io_end(&io, prev_ctx, 0, 15);
+    cppcut_assert_equal(uint64_t(1000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(3000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(2000000), io.blocked.t_usec);
+    cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
+
+    t.tv_sec = 7;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    prev_ctx = stats_io_begin(&io);
+    cppcut_assert_equal(&ctx, prev_ctx);
+    cppcut_assert_equal(uint64_t(5000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(7000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(2000000), io.blocked.t_usec);
+    cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
+
+    t.tv_sec = 15;
+    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    stats_io_end(&io, prev_ctx, 0, 20);
+    cppcut_assert_equal(uint64_t(5000000), ctx.t_usec);
+    cppcut_assert_equal(uint64_t(15000000), ctx.ti_usec);
+    cppcut_assert_equal(uint64_t(10000000), io.blocked.t_usec);
+    cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
 }
 
 }
