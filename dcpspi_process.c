@@ -750,10 +750,10 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
     return retval;
 }
 
-static inline void process_transaction(struct dcp_transaction *transaction,
-                                       struct slave_request_and_lock_data *rldata,
-                                       int fifo_in_fd, int fifo_out_fd,
-                                       int spi_fd, unsigned int spi_timeout_ms)
+static void process_transaction(struct dcp_transaction *transaction,
+                                struct slave_request_and_lock_data *rldata,
+                                int fifo_in_fd, int fifo_out_fd,
+                                int spi_fd, unsigned int spi_timeout_ms)
 {
     struct stats_context *prev_ctx =
         stats_context_switch(STATISTICS_STRUCT(busy_transaction));
