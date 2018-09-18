@@ -1,3 +1,10 @@
+2018-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 2.8 released.
+
+	* Debugging: Hex dumps for SPI traffic can be enabled via command line
+	  option (--dump-traffic).
+
 2018-07-12  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.7 released.
