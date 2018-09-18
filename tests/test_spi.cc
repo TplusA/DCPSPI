@@ -133,8 +133,8 @@ static void ensure_empty_read_buffer()
     static const struct timespec t1 = { .tv_sec = 1000, .tv_nsec = 0, };
     static const struct timespec t2 = { .tv_sec = 1000, .tv_nsec = 1, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
     mock_messages->expect_msg_error(0, LOG_NOTICE,
                                     "SPI read timeout, returning %zu of %zu bytes");
@@ -171,7 +171,7 @@ void test_read_from_spi()
     expect_spi_transfers(expected_content.size());
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     std::array<uint8_t, 100> buffer;
     buffer.fill(0xab);
@@ -216,7 +216,7 @@ void test_read_escaped_data_from_spi()
     expect_spi_transfers(escaped_data.size());
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     std::array<uint8_t, 11> buffer;
     buffer.fill(0x55);
@@ -255,7 +255,7 @@ void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escap
     cppcut_assert_equal(size_t(2), expect_spi_transfers(data.size()));
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     /* should receive 63 bytes */
     std::array<uint8_t, 2 * read_from_slave_spi_transfer_size - 1> buffer;
@@ -302,7 +302,7 @@ void test_write_to_spi()
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
@@ -330,7 +330,7 @@ void test_write_escaped_data_to_spi()
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
@@ -469,9 +469,9 @@ void test_timeout_without_any_read_is_not_possible()
         .tv_nsec = 0,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -509,11 +509,11 @@ void test_read_timeout_is_precisely_measured()
         .tv_nsec = 800UL * 1000UL * 1000UL,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -560,13 +560,13 @@ void test_timeout_overflow_in_struct_timespec()
         .tv_nsec = 300UL * 1000UL,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t4);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t4);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -610,13 +610,13 @@ void test_long_timeout()
         .tv_nsec = 300UL * 1000UL * 1000UL,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t3);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t4);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t4);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -675,7 +675,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
         spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, req);
 
         /* read DCP header */
-        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
         mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
         std::array<uint8_t, 4> command_header_buffer;
@@ -692,7 +692,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
 
         /* read DRCP command code (comes from internal buffer, no SPI transfer is
          * done here) */
-        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
         std::array<uint8_t, 1> drcp_command_buffer;
 
@@ -731,9 +731,9 @@ void test_send_timeout_without_any_write_is_not_possible()
         .tv_nsec = 0,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t1);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI write timeout, slave didn't get ready within 1000 ms");
 
@@ -758,15 +758,15 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
         .tv_nsec = 0,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     /* some NOP transfers while waiting for slave, one short transfer per 2 ms
      * (that is, we do NOT take the real amount of delay into account here,
      * which would be #delay_between_slave_probes_ms!) */
     for(int i = 0; i < 10; ++i)
     {
-        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
-        mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
         t.tv_nsec += 2UL * 1000UL * 1000UL;
 
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
@@ -804,18 +804,18 @@ void test_send_to_slave_may_fail_due_to_timeout()
         .tv_nsec = 0,
     };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     /* some NOP transfers while waiting for slave, one short transfer per 5 ms
      * (that is, we do NOT take the real amount of delay into account here,
      * which would be #delay_between_slave_probes_ms!) */
     for(int i = 0; i < 21; ++i)
     {
-        mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
         /* the 21st sleep does not happen because of timeout */
         if(i < 20)
-            mock_os->expect_os_nanosleep(delay_between_slave_probes_ms);
+            mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
 
         t.tv_nsec += 5UL * 1000UL * 1000UL;
 
@@ -860,7 +860,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
 
@@ -873,7 +873,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
                                         1000, nullptr));
 
     /* the slave's data sent while polling can be received */
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     std::array<uint8_t, 2> receive_buffer;
 
@@ -902,7 +902,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
                                                        true);
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -929,7 +929,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
 
     std::array<uint8_t, expected_data.size()> receive_buffer;
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
@@ -957,7 +957,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -984,7 +984,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
 
     std::array<uint8_t, expected_data.size()> receive_buffer;
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
@@ -1012,7 +1012,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -1040,7 +1040,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
 
     std::array<uint8_t, expected_data.size()> receive_buffer;
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
@@ -1069,7 +1069,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -1096,7 +1096,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
 
     std::array<uint8_t, expected_data.size()> receive_buffer;
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
 
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
@@ -1124,7 +1124,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -1138,7 +1138,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
                                         1000, nullptr));
 
     /* the slave's data sent while polling can be received */
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     std::array<uint8_t, 1> receive_buffer;
 
@@ -1166,7 +1166,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
 
     static const struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "Collision detected (got funny poll bytes)");
@@ -1180,7 +1180,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
                                         1000, nullptr));
 
     /* the slave's data sent while polling can be received */
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     std::array<uint8_t, 1> receive_buffer;
 

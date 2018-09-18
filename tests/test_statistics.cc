@@ -83,7 +83,7 @@ void test_context_enter_first()
     cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 
     static const struct timespec t = { .tv_sec = 300, .tv_nsec = 1234567, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_null(stats_context_switch(&ctx));
 
@@ -100,7 +100,7 @@ void test_context_simple_switch()
     cppcut_assert_equal(uint64_t(0), ctx.ti_usec);
 
     struct timespec t = { .tv_sec = 500, .tv_nsec = 20000, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_null(stats_context_switch(&ctx));
 
@@ -112,7 +112,7 @@ void test_context_simple_switch()
 
     t.tv_sec = 502;
     t.tv_nsec = 80000;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_equal(&ctx, stats_context_switch(&next));
     cppcut_assert_equal(uint64_t(0), next.t_usec);
@@ -130,7 +130,7 @@ void test_enter_same_context_is_filtered()
     cppcut_assert_equal(uint64_t(0), ctx.t_usec);
 
     struct timespec t = { .tv_sec = 82, .tv_nsec = 918374, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_null(stats_context_switch(&ctx));
 
@@ -147,7 +147,7 @@ void test_enter_same_context_is_filtered()
 
     t.tv_sec = 85;
     t.tv_nsec = 6000000;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_equal(&ctx, stats_context_switch(&next));
     cppcut_assert_equal(uint64_t(0), next.t_usec);
@@ -169,69 +169,69 @@ void test_chain_of_context_switches()
 
     struct timespec t = { .tv_sec = 731, .tv_nsec = 4235891, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_null(stats_context_switch(&ctx));
 
     /* ctx: 995764424 ns -> 995764 us */
     t.tv_sec = 732;
     t.tv_nsec = 315;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&ctx, stats_context_switch(&a));
     cppcut_assert_equal(uint64_t(995764), ctx.t_usec);
 
     /* a: 2059248649 ns -> 2059249 us */
     t.tv_sec = 734;
     t.tv_nsec = 59248964;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&a, stats_context_switch(&b));
     cppcut_assert_equal(uint64_t(2059249), a.t_usec);
 
     /* b: 20152 ns -> 20 us */
     t.tv_sec = 734;
     t.tv_nsec = 59269116;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&b, stats_context_switch(&c));
     cppcut_assert_equal(uint64_t(20), b.t_usec);
 
     /* c: 940743229 ns -> 940743 us */
     t.tv_sec = 735;
     t.tv_nsec = 12345;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&c, stats_context_switch(&ctx));
     cppcut_assert_equal(uint64_t(940743), c.t_usec);
 
     /* ctx: 3000000000 ns -> 3000000 us */
     t.tv_sec = 738;
     t.tv_nsec = 12345;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&ctx, stats_context_switch(&a));
     cppcut_assert_equal(uint64_t(3995764), ctx.t_usec);
 
     /* a: 999999999 ns -> 1000000 us */
     t.tv_sec = 739;
     t.tv_nsec = 12344;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&a, stats_context_switch(&b));
     cppcut_assert_equal(uint64_t(3059249), a.t_usec);
 
     /* b: 5008975245 ns -> 5008975 us */
     t.tv_sec = 744;
     t.tv_nsec = 8987589;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&b, stats_context_switch(&a));
     cppcut_assert_equal(uint64_t(5008995), b.t_usec);
 
     /* a: 991012411 ns -> 991012 us */
     t.tv_sec = 745;
     t.tv_nsec = 0;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&a, stats_context_switch(&c));
     cppcut_assert_equal(uint64_t(4050261), a.t_usec);
 
     /* c: 18234519 ns -> 18235 us */
     t.tv_sec = 745;
     t.tv_nsec = 18234519;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&c, stats_context_switch(&ctx));
     cppcut_assert_equal(uint64_t(958978), c.t_usec);
 
@@ -260,15 +260,15 @@ void test_switch_from_parent_to_child_context_and_back()
 
     struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_null(stats_context_switch(&ctx));
 
     t.tv_sec = 7;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&ctx, stats_context_switch(&child));
 
     t.tv_sec = 9;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&child, stats_context_switch_to_parent(&ctx));
 
     cppcut_assert_equal(uint64_t(7000000), ctx.t_usec);
@@ -277,11 +277,11 @@ void test_switch_from_parent_to_child_context_and_back()
     cppcut_assert_equal(uint64_t(2000000), child.ti_usec);
 
     t.tv_sec = 10;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&ctx, stats_context_switch(&child));
 
     t.tv_sec = 13;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     cppcut_assert_equal(&child, stats_context_switch_to_parent(&ctx));
 
     cppcut_assert_equal(uint64_t(8000000), ctx.t_usec);
@@ -329,10 +329,10 @@ static void check_delta_time_computation(const DeltaT &d)
     struct stats_context next;
     stats_context_reset(&next);
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, d.start_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, d.start_time);
     cppcut_assert_null(stats_context_switch(&ctx));
     mock_os->check();
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, d.end_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, d.end_time);
     cppcut_assert_equal(&ctx, stats_context_switch(&next));
     mock_os->check();
     cppcut_assert_equal(d.expected_delta_us, ctx.t_usec);
@@ -604,7 +604,7 @@ void test_event_counter_basics()
 void test_io_stastistics()
 {
     struct timespec t = { .tv_sec = 4190, .tv_nsec = 14589551, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     /* this might be our "idle" context, or any other context; but we must have
      * entered a context before we can gather I/O statistics */
@@ -618,7 +618,7 @@ void test_io_stastistics()
     cppcut_assert_equal(uint64_t(0), io.blocked.t_usec);
     cppcut_assert_equal(size_t(0), io.bytes_transferred);
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     struct stats_context *prev_ctx = stats_io_begin(&io);
     cppcut_assert_equal(&ctx, prev_ctx);
@@ -626,7 +626,7 @@ void test_io_stastistics()
     /* do some I/O...*/
     t.tv_sec = 4191;
     t.tv_nsec = 85312377;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     /* let's assume we have transferred 734782 bytes, and have observed 2
      * failures while doing so (whatever "failures" may mean) */
@@ -644,7 +644,7 @@ void test_io_stastistics()
 void test_cumulated_times()
 {
     struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
     cppcut_assert_null(stats_context_switch(&ctx));
 
@@ -652,7 +652,7 @@ void test_cumulated_times()
     stats_io_reset(&io);
 
     t.tv_sec = 1;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     struct stats_context *prev_ctx = stats_io_begin(&io);
     cppcut_assert_equal(&ctx, prev_ctx);
     cppcut_assert_equal(uint64_t(1000000), ctx.t_usec);
@@ -661,7 +661,7 @@ void test_cumulated_times()
     cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
 
     t.tv_sec = 3;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     stats_io_end(&io, prev_ctx, 0, 15);
     cppcut_assert_equal(uint64_t(1000000), ctx.t_usec);
     cppcut_assert_equal(uint64_t(3000000), ctx.ti_usec);
@@ -669,7 +669,7 @@ void test_cumulated_times()
     cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
 
     t.tv_sec = 7;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     prev_ctx = stats_io_begin(&io);
     cppcut_assert_equal(&ctx, prev_ctx);
     cppcut_assert_equal(uint64_t(5000000), ctx.t_usec);
@@ -678,7 +678,7 @@ void test_cumulated_times()
     cppcut_assert_equal(io.blocked.t_usec, io.blocked.ti_usec);
 
     t.tv_sec = 15;
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     stats_io_end(&io, prev_ctx, 0, 20);
     cppcut_assert_equal(uint64_t(5000000), ctx.t_usec);
     cppcut_assert_equal(uint64_t(15000000), ctx.ti_usec);

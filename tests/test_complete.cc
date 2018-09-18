@@ -410,7 +410,7 @@ static void wrap_data_into_protocol(std::vector<uint8_t> &buffer,
 
 static void expect_wait_for_spi_slave(const struct timespec &t)
 {
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
     spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
                                                        spi_rw_data_t::EXPECT_READ_ZEROS,
                                                        true);
@@ -454,7 +454,7 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
      * friendly name */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(true, process_data->gpio);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     static const std::array<uint8_t, 8> write_command
     {
         UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
@@ -469,7 +469,7 @@ static void run_complete_single_slave_transaction(uint16_t expected_slave_serial
     mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1160,7 +1160,7 @@ static void create_collision_state(const size_t expected_bytes_in_read_buffer,
         pending_slave_request_detected = true;
     }
 
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo(MESSAGE_LEVEL_DEBUG, process_transaction_message);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
@@ -1322,14 +1322,14 @@ collision_with_open_transaction_request(const RequestPinBehavior rpb_gpio_only_w
     /* switch over to slave transaction: slave sends write command for UPnP
      * friendly name, request pin still active */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1427,14 +1427,14 @@ collision_with_full_transaction_request(const RequestPinBehavior rpb_gpio_only_w
     /* switch over to slave transaction: slave sends write command for UPnP
      * friendly name, request pin not active anymore */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1510,14 +1510,14 @@ static void collision_with_full_request_followed_by_open_request(
     /* switch over to slave transaction: slave sends write command for UPnP
      * friendly name, request pin still active */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 3, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1576,7 +1576,7 @@ static void collision_with_full_request_followed_by_open_request(
         "Process transaction state 6, serial 0x0000, lock state 1, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x48 0x01 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1849,14 +1849,14 @@ void test_collision_with_lost_and_found_slave_request()
     /* switch over to slave transaction: slave sends write command for UPnP
      * friendly name */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, two_commands);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -1888,12 +1888,12 @@ void test_collision_with_lost_and_found_slave_request()
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 0, serial 0x0000, lock state 4, pending size 0, flush pos 0");
     mock_messages->expect_msg_info_formatted("Possibly found lost packet(s) in SPI input buffer");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x79 0x0b 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2030,14 +2030,14 @@ void test_collision_with_multiple_master_transactions_in_pipe_buffer()
     /* switch over to slave transaction: slave sends write command for UPnP
      * friendly name, request pin not active anymore */
     poll_results.expect(std::move(PollResult().set_return_value(0)));
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set(spi_rw_data_t::EXPECT_WRITE_NOPS, interrupting_slave_command_suffix);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
@@ -2164,7 +2164,7 @@ void test_junk_is_forwarded_to_dcpd()
     /* slave activates the request GPIO and sends junk */
     poll_results.expect(std::move(PollResult().set_gpio_events(POLLPRI).set_return_value(1)));
     mock_gpio->expect_gpio_is_active(true, process_data->gpio);
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     static const std::array<uint8_t, 10> junk_bytes
     {
@@ -2279,7 +2279,7 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
         "We will try to process this pending transaction anyway.");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     spi_rw_data->set<read_from_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
                                                         spi_rw_data_t::EXPECT_READ_NOPS,
                                                         false);
@@ -2290,7 +2290,7 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
         .tv_sec = dummy_time.tv_sec + timeout_seconds,
         .tv_nsec = dummy_time.tv_nsec,
     };
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, expired_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, expired_time);
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
         "SPI read timeout, returning 0 of 4 bytes");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
@@ -2353,7 +2353,7 @@ void test_new_transaction_even_if_slave_deasserts_request_line_too_soon()
         "We will try to process this pending transaction anyway.");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
         "Process transaction state 6, serial 0x0000, lock state 2, pending size 0, flush pos 0");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
     static const std::array<uint8_t, 8> write_command
     {
         UINT8_MAX, DCP_COMMAND_MULTI_WRITE_REGISTER, 0x58, 0x03, 0x00,
@@ -2363,7 +2363,7 @@ void test_new_transaction_even_if_slave_deasserts_request_line_too_soon()
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DIAG,
         "Slave transaction: command header from SPI: 0x02 0x58 0x03 0x00");
-    mock_os->expect_os_clock_gettime(0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
 
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
