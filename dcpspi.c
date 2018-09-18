@@ -332,6 +332,7 @@ struct parameters
     bool gpio_needs_debouncing;
     bool dummy_mode;
     bool gather_statistics;
+    bool dump_spi_traffic;
 };
 
 /*!
@@ -352,6 +353,9 @@ static int setup(const struct parameters *parameters,
     msg_install_extra_handler(5, extra_signals);
 
     dcpspi_statistics_enable(parameters->gather_statistics);
+
+    if(parameters->dump_spi_traffic)
+        spi_enable_traffic_dump();
 
     if(!parameters->run_in_foreground)
         openlog("dcpspi", LOG_PID, LOG_DAEMON);
@@ -418,6 +422,7 @@ static void usage(const char *program_name)
            "  --fg           Run in foreground, don't run as daemon.\n"
            "  --verbose lvl  Set verbosity level to given level.\n"
            "  --quiet        Short for \"--verbose quite\".\n"
+           "  --dump-traffic Dump SPI traffic to log (independent of verbosity level).\n"
            "  --stats        Enable gathering statistics.\n"
            "  --ififo name   Name of the named pipe the DCP daemon writes to.\n"
            "  --ofifo name   Name of the named pipe the DCP daemon reads from.\n"
@@ -441,6 +446,7 @@ static int process_command_line(int argc, char *argv[],
     parameters->gpio_needs_debouncing = false;
     parameters->dummy_mode = false;
     parameters->gather_statistics = false;
+    parameters->dump_spi_traffic = false;
 
 #define CHECK_ARGUMENT() \
     do \
@@ -483,6 +489,8 @@ static int process_command_line(int argc, char *argv[],
         }
         else if(strcmp(argv[i], "--quiet") == 0)
             parameters->verbose_level = MESSAGE_LEVEL_QUIET;
+        else if(strcmp(argv[i], "--dump-traffic") == 0)
+            parameters->dump_spi_traffic = true;
         else if(strcmp(argv[i], "--stats") == 0)
             parameters->gather_statistics = true;
         else if(strcmp(argv[i], "--ififo") == 0)
