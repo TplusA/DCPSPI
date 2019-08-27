@@ -1,3 +1,11 @@
+2019-11-05  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 3.0 released.
+
+	* Licensing: Changed license from GPLv3+ to GPLv2+.
+
+	* Build system: Support Meson.
+
 2018-09-18  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 2.8 released.
@@ -220,4 +228,4 @@
 	* First release for testing.
 
 
-Copyright 2015, 2016, 2017, 2018 T+A elektroakustik GmbH & Co. KG
+Copyright 2015, 2016, 2017, 2018, 2019 T+A elektroakustik GmbH & Co. KG
