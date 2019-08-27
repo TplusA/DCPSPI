@@ -6,6 +6,9 @@
 /config/
 /configure
 /cscope.out
+/GPATH
+/GRTAGS
+/GTAGS
 /tags
 /types_c.taghl
 /types_js.taghl
