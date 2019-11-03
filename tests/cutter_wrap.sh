@@ -1,0 +1,1 @@
+../strbo_common/tests/cutter_wrap.sh
