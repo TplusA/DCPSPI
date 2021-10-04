@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2018, 2019, 2021  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -32,6 +32,7 @@
 
 static bool seconds_to_nanoseconds(const uint64_t s, uint64_t *ns)
 {
+    // cppcheck-suppress signConversion
     static const uint64_t max = UINT64_MAX / S_IN_NANO;
 
     if(s <= max)

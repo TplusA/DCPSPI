@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018, 2019, 2021  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -361,10 +361,9 @@ static int setup(const struct parameters *parameters,
         spi_enable_traffic_dump();
 
     if(!parameters->run_in_foreground)
+    {
         openlog("dcpspi", LOG_PID, LOG_DAEMON);
 
-    if(!parameters->run_in_foreground)
-    {
         if(daemon(0, 0) < 0)
         {
             msg_error(errno, LOG_EMERG, "Failed to run as daemon");
