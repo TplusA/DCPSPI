@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019  T+A elektroakustik GmbH & Co. KG
+# Copyright (C) 2019, 2022  T+A elektroakustik GmbH & Co. KG
 #
 # This file is part of DCPSPI.
 #
@@ -20,7 +20,7 @@
 #
 
 project('DCPSPI', ['cpp', 'c'], license: 'GPL2+',
-    version: '3.0',
+    version: '3.1',
     default_options: ['warning_level=3', 'cpp_std=c++14', 'buildtype=plain'],
 )
 
