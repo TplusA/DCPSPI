@@ -165,7 +165,7 @@ static int hook_to_gpio(unsigned int num)
     }
 
     filename = mk_gpio_name(export_dir, "direction");
-    if(wait_for_path(filename, 50, 10, 200, true) < 0)
+    if(wait_for_path(filename, 1000, 10, 200, true) < 0)
         return -1;
 
     buffer_length = snprintf(buffer, sizeof(buffer), "%s", "in");
@@ -173,7 +173,7 @@ static int hook_to_gpio(unsigned int num)
         return -1;
 
     filename = mk_gpio_name(export_dir, "edge");
-    if(wait_for_path(filename, 50, 10, 150, true) < 0)
+    if(wait_for_path(filename, 1000, 10, 200, true) < 0)
         return -1;
 
     buffer_length = snprintf(buffer, sizeof(buffer), "%s", "both");
