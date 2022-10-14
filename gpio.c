@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -98,18 +98,28 @@ static int wait_for_path(const char *path, int tries,
                          unsigned int max_sleep_ms_between_tries,
                          bool show_error)
 {
+    int tries_left = tries;
     unsigned int sleep_ms_between_tries = 0;
     struct timespec tp = { 0 };
 
     while(1)
     {
         if(access(path, W_OK) == 0)
-            return 0;
+        {
+            const int tried = tries - tries_left + 1;
+            msg_vinfo(MESSAGE_LEVEL_DIAG,
+                      "Path \"%s\" accessible after %d %s",
+                      path, tried, tried == 1 ? "try" : "tries");
 
-        if(--tries <= 0)
+            return 0;
+        }
+
+        if(--tries_left <= 0)
         {
             if(show_error)
-                msg_error(errno, LOG_EMERG, "Path \"%s\" not accessible", path);
+                msg_error(errno, LOG_EMERG,
+                          "Path \"%s\" not accessible after %d tries",
+                          path, tries);
 
             return -1;
         }
