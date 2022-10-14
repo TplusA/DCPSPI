@@ -1,3 +1,11 @@
+2022-10-14  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 3.2 released.
+
+	* GPIO: Make exporting of GPIOs to sysfs more robust.
+
+	* Misc: Fix another non-critical compiler warning.
+
 2022-09-15  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 3.1 released.
