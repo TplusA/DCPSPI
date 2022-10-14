@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -82,7 +82,7 @@ int spi_open_device(const char *devname)
 
 void spi_close_device(int fd)
 {
-    return spi_hw_close_device(fd);
+    spi_hw_close_device(fd);
 }
 
 static void compute_expiration_time(struct timespec *t, unsigned int timeout_ms)
