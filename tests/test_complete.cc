@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2016, 2018, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -2287,7 +2287,7 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
                                                         spi_rw_data_t::EXPECT_READ_NOPS,
                                                         false);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
-    static constexpr int timeout_seconds = 1;
+    static constexpr int timeout_seconds = 5;
     static const struct timespec expired_time =
     {
         .tv_sec = dummy_time.tv_sec + timeout_seconds,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2016, 2018, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -1031,7 +1031,7 @@ bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
 {
     stats_context_switch(STATISTICS_STRUCT(busy_unspecific));
 
-    static const unsigned int spi_timeout_ms = 1000;
+    static const unsigned int spi_timeout_ms = 5000;
 
     if(rldata->is_running_for_real)
     {
