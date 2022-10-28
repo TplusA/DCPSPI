@@ -533,7 +533,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
                                fifo_in_fd,
                                STATISTICS_STRUCT(dcpd_reads)) < 0)
         {
-            msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
+            msg_error(0, LOG_ERR, "%s: communication with DCPD broken (receive)",
                       tr_log_prefix(transaction->state));
             retval = reset_transaction(transaction);
             break;
@@ -730,7 +730,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
 
             if(sent_bytes < 0)
             {
-                msg_error(0, LOG_ERR, "%s: communication with DCPD broken",
+                msg_error(0, LOG_ERR, "%s: communication with DCPD broken (send)",
                           tr_log_prefix(transaction->state));
                 retval = reset_transaction(transaction);
                 break;
