@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -70,10 +70,6 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  * \param buffer, length
  *     Buffer to send and its size.
  *
- * \param timeout_ms
- *     The maximum amount of time to wait for the slave to get ready in
- *     milliseconds.
- *
  * \param io
  *     Structure for gathering I/O statistics.
  *
@@ -84,7 +80,6 @@ size_t spi_fill_buffer_from_raw_data(uint8_t *dest, size_t dest_size,
  *                                     transaction).
  */
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms,
                                    struct stats_io *io);
 
 /*!
@@ -94,15 +89,15 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
  * and escape sequences are removed from the input and the number of remaining
  * useful bytes is returned.
  *
- * If the buffer couldn't be filled with non-NOP bytes after \p timeout_ms
- * milliseconds, the function returns prematurely with the number of bytes
+ * If the buffer couldn't be filled with non-NOP bytes after exceeding a
+ * timeout, the function returns prematurely with the number of bytes
  * actually read. That is, this function will return 0 in case only NOP bytes
  * were received.
  *
  * \returns Number of non-NOP bytes, or -1 on error.
  */
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
-                        unsigned int timeout_ms, struct stats_io *io);
+                        struct stats_io *io);
 
 /*!
  * Check if there could be another packet in the internal receive buffer.

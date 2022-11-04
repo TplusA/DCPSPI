@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015, 2016, 2018, 2019  T+A elektroakustik GmbH & Co. KG
+ * Copyright (C) 2015, 2016, 2018, 2019, 2022  T+A elektroakustik GmbH & Co. KG
  *
  * This file is part of DCPSPI.
  *
@@ -131,14 +131,65 @@ static int return_nops(int fd, const struct spi_ioc_transfer spi_transfer[],
     return 0;
 }
 
+static void advance_to_last_read_timeout_iteration(struct timespec &t,
+                                                   long add_seconds_first = 1,
+                                                   long add_seconds_second = 0)
+{
+    /* first iteration always runs into a timeout if SPI remains silent,
+     * regardless of current time; this is part of the strategy */
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
+    /* more iterations */
+    for(int i = 0; i < 4; ++i)
+    {
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+        t.tv_sec += add_seconds_first;
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+        t.tv_sec += add_seconds_second;
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    }
+}
+
+static void advance_to_last_send_timeout_iteration(struct timespec &t,
+                                                   long add_seconds_first = 1,
+                                                   long add_seconds_second = 0)
+{
+    /* first iteration always runs into a timeout if SPI slave doesn't respond
+     * immediately on first try, regardless of current time; this is part of
+     * the strategy */
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
+    /* more iterations */
+    for(int i = 0; i < 2; ++i)
+    {
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+        t.tv_sec += add_seconds_first;
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+        mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+        t.tv_sec += add_seconds_second;
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    }
+}
+
 static void ensure_empty_read_buffer()
 {
-    static const struct timespec t1 = { .tv_sec = 1000, .tv_nsec = 0, };
-    static const struct timespec t2 = { .tv_sec = 1000, .tv_nsec = 1, };
+    struct timespec t = { .tv_sec = 1000, .tv_nsec = 0, };
+    advance_to_last_read_timeout_iteration(t);
 
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
+    /* last iteration: timeout */
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
+    ++t.tv_sec;
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
     mock_messages->expect_msg_error(0, LOG_NOTICE,
                                     "SPI read timeout, returning %zu of %zu bytes");
 
@@ -146,7 +197,7 @@ static void ensure_empty_read_buffer()
 
     const ssize_t bytes =
         spi_read_buffer(expected_spi_fd, should_remain_untouched,
-                        sizeof(should_remain_untouched), 0, nullptr);
+                        sizeof(should_remain_untouched), nullptr);
 
     if(bytes > 0)
     {
@@ -181,7 +232,7 @@ void test_read_from_spi()
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 
     cut_assert_equal_memory(expected_content.data(), expected_content.size(),
@@ -226,7 +277,7 @@ void test_read_escaped_data_from_spi()
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 
     static const std::array<uint8_t, 11> expected_content =
@@ -266,7 +317,7 @@ void test_read_escaped_data_from_spi_with_last_character_in_first_chunk_is_escap
 
     cppcut_assert_equal(ssize_t(buffer.size()),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 500,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 
     std::array<uint8_t, 2 * read_from_slave_spi_transfer_size - 1> expected_content = {0};
@@ -310,7 +361,7 @@ void test_write_to_spi()
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
                                         expected_content.data(),
-                                        expected_content.size(), 500,
+                                        expected_content.size(),
                                         nullptr));
 }
 
@@ -337,7 +388,7 @@ void test_write_escaped_data_to_spi()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd, raw_data.data(),
-                                        raw_data.size(), 500, nullptr));
+                                        raw_data.size(), nullptr));
 }
 
 /*!\test
@@ -458,23 +509,19 @@ static void expect_buffer_content(std::array<uint8_t, N> &buffer,
  * Timeout during read due to extreme latency (context switch) between time
  * measurements.
  */
-void test_timeout_without_any_read_is_not_possible()
+void test_read_timeout_strategy_is_aware_of_extreme_latencies()
 {
-    static const struct timespec t1 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 0,
-    };
+    struct timespec t = { .tv_sec = 1, .tv_nsec = 0, };
 
-    static const struct timespec t2 =
-    {
-        .tv_sec = 3,
-        .tv_nsec = 0,
-    };
+    /* very high latency due to assumed high system load and effects of
+     * real-time scheduling */
+    advance_to_last_read_timeout_iteration(t, 3, 3);
 
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
+    /* the final iteration leads to a definite timeout */
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
+    t.tv_sec += 3;
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -483,7 +530,7 @@ void test_timeout_without_any_read_is_not_possible()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
     expect_buffer_content(buffer, 0x55);
 }
@@ -494,29 +541,23 @@ void test_timeout_without_any_read_is_not_possible()
  */
 void test_read_timeout_is_precisely_measured()
 {
-    static const struct timespec t1 =
-    {
-        .tv_sec = 0,
-        .tv_nsec = 0,
-    };
+    struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    advance_to_last_read_timeout_iteration(t);
 
-    static const struct timespec t2 =
-    {
-        .tv_sec = 0,
-        .tv_nsec = 800UL * 1000UL * 1000UL - 1UL,
-    };
-
-    static const struct timespec t3 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 800UL * 1000UL * 1000UL,
-    };
-
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
+    /* 999,999,999 nanoseconds later */
+    t.tv_nsec = 1000UL * 1000UL * 1000UL - 1UL,
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+
+    /* one nanoseconds later (we ignore the 5 ms delay in this test to
+     * demonstrate the nanoseconds precision */
+    ++t.tv_sec;
+    t.tv_nsec = 0;
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
+
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -525,7 +566,7 @@ void test_read_timeout_is_precisely_measured()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 800,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
     expect_buffer_content(buffer, 0x55);
 }
@@ -536,40 +577,30 @@ void test_read_timeout_is_precisely_measured()
  */
 void test_timeout_overflow_in_struct_timespec()
 {
-    static const struct timespec t1 =
-    {
-        .tv_sec = 0,
-        .tv_nsec = 1000UL * 1000UL * 1000UL - 700UL * 1000UL,
-    };
+    struct timespec t = { .tv_sec = 0, .tv_nsec = 0, };
+    advance_to_last_read_timeout_iteration(t);
 
-    /* 0.7 milliseconds later */
-    static const struct timespec t2 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 0,
-    };
-
-    /* 0.999 milliseconds later than t1 */
-    static const struct timespec t3 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 300UL * 1000UL - 1UL,
-    };
-
-    /* 1 millisecond later than t1 */
-    static const struct timespec t4 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 300UL * 1000UL,
-    };
-
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
+    /* 700 milliseconds later */
+    t.tv_nsec = 700UL * 1000UL * 1000UL;
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+
+    /* total 999 milliseconds later */
+    t.tv_nsec = (1000UL - delay_between_slave_probes_ms - 1) * 1000UL * 1000UL;
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+    t.tv_nsec += delay_between_slave_probes_ms * 1000UL * 1000UL;
+    cppcut_assert_equal(999L * 1000 * 1000, t.tv_nsec);
+
+    /* yet another millisecond later (total 1000 milliseconds), leading to the
+     * final timeout */
+    ++t.tv_sec;
+    t.tv_nsec = 0;
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t4);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
                                               "SPI read timeout, returning 0 of 10 bytes");
 
@@ -577,57 +608,7 @@ void test_timeout_overflow_in_struct_timespec()
 
     cppcut_assert_equal(ssize_t(0),
                         spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1,
-                                        nullptr));
-}
-
-/*!\test
- * Timeout handling also works on a seconds scale.
- */
-void test_long_timeout()
-{
-    static const struct timespec t1 =
-    {
-        .tv_sec = 0,
-        .tv_nsec = 300UL * 1000UL * 1000UL,
-    };
-
-    /* 1.7 seconds later than t1 */
-    static const struct timespec t2 =
-    {
-        .tv_sec = 2,
-        .tv_nsec = 0,
-    };
-
-    /* 2.999999999 seconds later than t1 */
-    static const struct timespec t3 =
-    {
-        .tv_sec = 3,
-        .tv_nsec = 300UL * 1000UL * 1000UL - 1UL,
-    };
-
-    /* 3 seconds later than t1 */
-    static const struct timespec t4 =
-    {
-        .tv_sec = 3,
-        .tv_nsec = 300UL * 1000UL * 1000UL,
-    };
-
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t3);
-    mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t4);
-    mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
-                                              "SPI read timeout, returning 0 of 10 bytes");
-
-    std::array<uint8_t, 10> buffer;
-
-    cppcut_assert_equal(ssize_t(0),
-                        spi_read_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 3000,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 }
 
@@ -687,7 +668,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
                             spi_read_buffer(expected_spi_fd,
                                             command_header_buffer.data(),
                                             command_header_buffer.size(),
-                                            10, nullptr));
+                                            nullptr));
         cut_assert_equal_memory(req.data(),
                                 command_header_buffer.size(),
                                 command_header_buffer.data(),
@@ -703,7 +684,7 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
                             spi_read_buffer(expected_spi_fd,
                                             drcp_command_buffer.data(),
                                             drcp_command_buffer.size(),
-                                            10, nullptr));
+                                            nullptr));
         cut_assert_equal_memory(req.data() + command_header_buffer.size(),
                                 drcp_command_buffer.size(),
                                 drcp_command_buffer.data(),
@@ -720,32 +701,24 @@ void test_new_spi_slave_transaction_clears_internal_receive_buffer()
  * Timeout during write due to extreme latency (context switch) between time
  * measurements.
  */
-void test_send_timeout_without_any_write_is_not_possible()
+void test_send_timeout_strategy_is_aware_of_extreme_latencies()
 {
-    static const struct timespec t1 =
-    {
-        .tv_sec = 1,
-        .tv_nsec = 0,
-    };
+    struct timespec t = { .tv_sec = 1, .tv_nsec = 0, };
+    advance_to_last_send_timeout_iteration(t, 3, 3);
 
-    static const struct timespec t2 =
-    {
-        .tv_sec = 3,
-        .tv_nsec = 0,
-    };
-
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t1);
+    t.tv_sec += 3;
     mock_spi_hw->expect_spi_hw_do_transfer_callback(return_nops);
-    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t2);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
-                                              "SPI write timeout, slave didn't get ready within 1000 ms");
+                                              "SPI write timeout, slave didn't get ready within 3000 ms");
 
     std::array<uint8_t, 10> buffer;
     buffer.fill(0x55);
 
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 1000,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 }
 
@@ -768,14 +741,20 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
      * which would be #delay_between_slave_probes_ms!) */
     for(int i = 0; i < 10; ++i)
     {
+        spi_rw_data->set<wait_for_slave_spi_transfer_size>(
+                                            spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                            spi_rw_data_t::EXPECT_READ_NOPS,
+                                            true);
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+
+        t.tv_nsec += 2UL * 1000UL * 1000UL;
         mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
         mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
-        t.tv_nsec += 2UL * 1000UL * 1000UL;
+        t.tv_nsec += delay_between_slave_probes_ms * 1000UL * 1000UL;
 
-        spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
-                                                           spi_rw_data_t::EXPECT_READ_NOPS,
-                                                           true);
-        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+        if(i == 0)
+            mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+
     }
 
     /* slave signals it's ready */
@@ -792,7 +771,7 @@ void test_send_to_slave_waits_for_zero_byte_answer_before_sending()
 
     cppcut_assert_equal(SPI_SEND_RESULT_OK,
                         spi_send_buffer(expected_spi_fd,
-                                        buffer.data(), buffer.size(), 100,
+                                        buffer.data(), buffer.size(),
                                         nullptr));
 }
 
@@ -809,18 +788,30 @@ void test_send_to_slave_may_fail_due_to_timeout()
 
     mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
-    /* some NOP transfers while waiting for slave, one short transfer per 5 ms
-     * (that is, we do NOT take the real amount of delay into account here,
-     * which would be #delay_between_slave_probes_ms!) */
-    for(int i = 0; i < 21; ++i)
+    /* some NOP transfers while waiting for slave */
+    for(int i = 0; i < int(3000 / delay_between_slave_probes_ms + 1); ++i)
     {
         mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
 
-        /* the 21st sleep does not happen because of timeout */
-        if(i < 20)
+        /* the final sleep/get time do not happen because of timeout */
+        if(i < int(3000 / delay_between_slave_probes_ms))
+        {
             mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
 
-        t.tv_nsec += 5UL * 1000UL * 1000UL;
+            if(t.tv_nsec == 0)
+            {
+                /* iterations are 1s each, so we can conveniently insert
+                 * os_clock_gettime() expectations on wrapping seconds */
+                mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
+            }
+        }
+
+        t.tv_nsec += delay_between_slave_probes_ms * 1000UL * 1000UL;
+        if(t.tv_nsec >= 1000L * 1000L * 1000L)
+        {
+            t.tv_nsec = 0;
+            ++t.tv_sec;
+        }
 
         spi_rw_data->set<wait_for_slave_spi_transfer_size>(spi_rw_data_t::EXPECT_WRITE_NOPS,
                                                            spi_rw_data_t::EXPECT_READ_NOPS,
@@ -837,12 +828,12 @@ void test_send_to_slave_may_fail_due_to_timeout()
     /* no further SPI transfer takes place for the data, instead a log message
      * is emitted and an error code is returned */
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
-                                              "SPI write timeout, slave didn't get ready within 100 ms");
+                                              "SPI write timeout, slave didn't get ready within 3000 ms");
 
     cppcut_assert_equal(SPI_SEND_RESULT_TIMEOUT,
                         spi_send_buffer(expected_spi_fd,
                                         not_sent_data.data(),
-                                        not_sent_data.size(), 100, nullptr));
+                                        not_sent_data.size(), nullptr));
 }
 
 /*!\test
@@ -873,7 +864,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
@@ -883,7 +874,7 @@ void test_collision_detection_by_inspecting_poll_bytes()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[0]));
     cppcut_assert_equal(0xa5, static_cast<int>(receive_buffer[1]));
@@ -916,7 +907,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 5> second_fragment = { 0x66, 0x77, 0x88, 0xaa, 0xfe, };
@@ -938,7 +929,7 @@ void test_collision_in_poll_bytes_does_not_discard_bytes_sent_by_slave()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -971,7 +962,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x33, 0x09, 0x1f, };
@@ -993,7 +984,7 @@ void test_collision_in_poll_bytes_does_not_confuse_escape_sequences()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1026,7 +1017,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* slave sends more data to complete its command: the 0x01 is escaped */
     static const std::array<uint8_t, 4> second_fragment = { 0x01, 0x80, 0x71, 0xba, };
@@ -1049,7 +1040,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1083,7 +1074,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* slave sends more data to complete its command */
     static const std::array<uint8_t, 3> second_fragment = { 0x01, 0x02, 0x03, };
@@ -1105,7 +1096,7 @@ void test_collision_in_poll_bytes_may_end_with_escape_character_after_nops()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cut_assert_equal_memory(expected_data.data(), expected_data.size(),
                             receive_buffer.data(), receive_buffer.size());
@@ -1138,7 +1129,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
@@ -1148,7 +1139,7 @@ void test_collision_in_poll_bytes_may_begin_with_nop()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cppcut_assert_equal(0x3a, static_cast<int>(receive_buffer[0]));
 
@@ -1180,7 +1171,8 @@ void test_collision_in_poll_bytes_may_end_with_nop()
     cppcut_assert_equal(SPI_SEND_RESULT_COLLISION,
                         spi_send_buffer(expected_spi_fd,
                                         send_buffer.data(), send_buffer.size(),
-                                        1000, nullptr));
+                                        nullptr));
+    mock_os->check();
 
     /* the slave's data sent while polling can be received */
     mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, t);
@@ -1190,7 +1182,7 @@ void test_collision_in_poll_bytes_may_end_with_nop()
     cppcut_assert_equal(ssize_t(receive_buffer.size()),
                         spi_read_buffer(expected_spi_fd,
                                         receive_buffer.data(),
-                                        receive_buffer.size(), 500, nullptr));
+                                        receive_buffer.size(), nullptr));
 
     cppcut_assert_equal(0xc5, static_cast<int>(receive_buffer[0]));
 

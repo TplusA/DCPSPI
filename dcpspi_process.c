@@ -409,8 +409,7 @@ static const char *tr_log_prefix(enum transaction_state state)
 
 static bool process_transaction_receive_data(struct dcp_transaction *transaction,
                                              struct slave_request_and_lock_data *rldata,
-                                             int fifo_in_fd, int spi_fd,
-                                             unsigned int spi_timeout_ms)
+                                             int fifo_in_fd, int spi_fd)
 {
     const char *read_peer =
         (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE) ? "slave" : "DCPD";
@@ -420,8 +419,7 @@ static bool process_transaction_receive_data(struct dcp_transaction *transaction
         (transaction->state == TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE)
         ? spi_read_buffer(spi_fd,
                           transaction->dcp_buffer.buffer + transaction->dcp_buffer.pos,
-                          read_size, spi_timeout_ms,
-                          STATISTICS_STRUCT(spi_transfers))
+                          read_size, STATISTICS_STRUCT(spi_transfers))
         : fill_buffer_from_fd(&transaction->dcp_buffer, read_size, fifo_in_fd,
                               STATISTICS_STRUCT(dcpd_reads));
 
@@ -474,8 +472,7 @@ static void reject_or_drop(struct dcp_transaction *transaction,
 
 static bool do_process_transaction(struct dcp_transaction *transaction,
                                    struct slave_request_and_lock_data *rldata,
-                                   int fifo_in_fd, int fifo_out_fd,
-                                   int spi_fd, unsigned int spi_timeout_ms)
+                                   int fifo_in_fd, int fifo_out_fd, int spi_fd)
 {
     msg_vinfo(MESSAGE_LEVEL_DEBUG,
               "Process transaction state %d, serial 0x%04x, lock state %d, "
@@ -615,7 +612,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
         const enum SpiSendResult ret = is_dummy_header
             ? SPI_SEND_RESULT_OK
             : spi_send_buffer(spi_fd, transaction->spi_buffer.buffer,
-                              transaction->spi_buffer.pos, spi_timeout_ms,
+                              transaction->spi_buffer.pos,
                               STATISTICS_STRUCT(spi_transfers));
         switch(ret)
         {
@@ -654,7 +651,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
       case TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE:
         if(spi_read_buffer(spi_fd,
                            transaction->dcp_buffer.buffer + DCPSYNC_HEADER_SIZE,
-                           DCP_HEADER_SIZE, spi_timeout_ms,
+                           DCP_HEADER_SIZE,
                            STATISTICS_STRUCT(spi_transfers)) < DCP_HEADER_SIZE)
         {
             retval = reset_transaction(transaction);
@@ -709,8 +706,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
       case TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD:
       case TR_SLAVE_COMMAND_RECEIVING_DATA_FROM_SLAVE:
         retval = process_transaction_receive_data(transaction, rldata,
-                                                  fifo_in_fd, spi_fd,
-                                                  spi_timeout_ms);
+                                                  fifo_in_fd, spi_fd);
         break;
 
       case TR_MASTER_COMMAND_SKIPPED:
@@ -755,15 +751,13 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
 
 static void process_transaction(struct dcp_transaction *transaction,
                                 struct slave_request_and_lock_data *rldata,
-                                int fifo_in_fd, int fifo_out_fd,
-                                int spi_fd, unsigned int spi_timeout_ms)
+                                int fifo_in_fd, int fifo_out_fd, int spi_fd)
 {
     struct stats_context *prev_ctx =
         stats_context_switch(STATISTICS_STRUCT(busy_transaction));
 
     while(do_process_transaction(transaction, rldata,
-                                 fifo_in_fd, fifo_out_fd,
-                                 spi_fd, spi_timeout_ms))
+                                 fifo_in_fd, fifo_out_fd, spi_fd))
         ;
 
     stats_context_switch(prev_ctx);
@@ -788,8 +782,7 @@ static enum RequestLineChanges determine_gpio_changes(bool current_state,
 
 static bool process_request_line(struct dcp_transaction *transaction,
                                  struct slave_request_and_lock_data *rldata,
-                                 int fifo_in_fd, int fifo_out_fd,
-                                 int spi_fd, unsigned int spi_timeout_ms)
+                                 int fifo_in_fd, int fifo_out_fd, int spi_fd)
 {
     struct stats_context *prev_ctx =
         stats_context_switch(STATISTICS_STRUCT(busy_gpio));
@@ -824,8 +817,7 @@ static bool process_request_line(struct dcp_transaction *transaction,
                 {
                     /* assertion of request line starts slave transaction */
                     process_transaction(transaction, rldata,
-                                        fifo_in_fd, fifo_out_fd,
-                                        spi_fd, spi_timeout_ms);
+                                        fifo_in_fd, fifo_out_fd, spi_fd);
                 }
                 else
                     msg_vinfo(MESSAGE_LEVEL_DIAG,
@@ -977,7 +969,7 @@ static bool wait_for_events(const struct dcp_transaction *const transaction,
 
 static bool wait_for_dcp_data(struct dcp_transaction *transaction,
                               const int fifo_in_fd, const int fifo_out_fd,
-                              const int spi_fd, unsigned int spi_timeout_ms,
+                              const int spi_fd,
                               struct slave_request_and_lock_data *rldata)
 {
     struct pollfd fds[EVENT_FD_COUNT];
@@ -988,11 +980,9 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
     if(fds[0].revents & POLLPRI)
     {
         if(process_request_line(transaction, rldata,
-                                fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms))
+                                fifo_in_fd, fifo_out_fd, spi_fd))
             process_transaction(transaction, rldata,
-                                fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms);
+                                fifo_in_fd, fifo_out_fd, spi_fd);
     }
 
     if(fds[0].revents & ~(POLLPRI | POLLERR))
@@ -1012,8 +1002,7 @@ static bool wait_for_dcp_data(struct dcp_transaction *transaction,
     {
         if(expecting_dcp_data(transaction))
             process_transaction(transaction, rldata,
-                                fifo_in_fd, fifo_out_fd,
-                                spi_fd, spi_timeout_ms);
+                                fifo_in_fd, fifo_out_fd, spi_fd);
     }
 
     if(fds[1].revents & ~POLLIN)
@@ -1031,8 +1020,6 @@ bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
 {
     stats_context_switch(STATISTICS_STRUCT(busy_unspecific));
 
-    static const unsigned int spi_timeout_ms = 5000;
-
     if(rldata->is_running_for_real)
     {
         struct pollfd fds[EVENT_FD_COUNT];
@@ -1041,19 +1028,15 @@ bool dcpspi_process(const int fifo_in_fd, const int fifo_out_fd,
            (fds[0].revents & POLLPRI) != 0)
         {
             process_request_line(transaction, rldata,
-                                 fifo_in_fd, fifo_out_fd,
-                                 spi_fd, spi_timeout_ms);
+                                 fifo_in_fd, fifo_out_fd, spi_fd);
         }
     }
 
     if(expecting_dcp_data(transaction) || expecting_gpio_change(transaction))
         return wait_for_dcp_data(transaction,
-                                 fifo_in_fd, fifo_out_fd,
-                                 spi_fd, spi_timeout_ms, rldata);
+                                 fifo_in_fd, fifo_out_fd, spi_fd, rldata);
 
-    process_transaction(transaction, rldata,
-                        fifo_in_fd, fifo_out_fd,
-                        spi_fd, spi_timeout_ms);
+    process_transaction(transaction, rldata, fifo_in_fd, fifo_out_fd, spi_fd);
 
     return true;
 }

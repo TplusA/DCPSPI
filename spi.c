@@ -50,6 +50,11 @@ static const uint8_t spi_dummy_bytes[32] =
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
 
+static const unsigned int spi_wait_for_slave_timeout_ms = 1000;
+static const unsigned int spi_wait_for_slave_timeout_max_iterations = 3;
+static const unsigned int spi_read_from_slave_timeout_ms = 1000;
+static const unsigned int spi_read_from_slave_timeout_max_iterations = 5;
+
 static enum MessageVerboseLevel hexdump_traffic_level   = MESSAGE_LEVEL_TRACE;
 static enum MessageVerboseLevel hexdump_discarded_level = MESSAGE_LEVEL_DEBUG;
 static enum MessageVerboseLevel hexdump_collision_level = MESSAGE_LEVEL_DIAG;
@@ -88,6 +93,9 @@ void spi_close_device(int fd)
 static void compute_expiration_time(struct timespec *t, unsigned int timeout_ms)
 {
     os_clock_gettime(CLOCK_MONOTONIC_RAW, t);
+
+    if(timeout_ms == 0)
+        return;
 
     const unsigned long timeout_remainder_ns =
         (timeout_ms % 1000U) * 1000ULL * 1000ULL;
@@ -169,9 +177,25 @@ static size_t filter_input(uint8_t *const buffer, size_t buffer_size,
     return dest_pos;
 }
 
+static inline bool has_timeout_expired(struct timespec *expiration_time,
+                                       unsigned int *expirations_left,
+                                       bool *need_recompute_timeout)
+{
+    struct timespec current_time;
+    os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+
+    if(!timeout_expired(expiration_time, &current_time))
+        return false;
+
+    if(--*expirations_left == 0)
+        return true;
+
+    *need_recompute_timeout = true;
+    return false;
+}
+
 static enum SpiSendResult
-wait_for_spi_slave(int fd, unsigned int timeout_ms,
-                   uint8_t *const buffer, const size_t buffer_size,
+wait_for_spi_slave(int fd, uint8_t *const buffer, const size_t buffer_size,
                    bool *have_significant_data, struct stats_io *io)
 {
     const struct spi_ioc_transfer spi_transfer[] =
@@ -187,8 +211,31 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
 
     *have_significant_data = false;
 
+    /*
+     * We need to try a few times because we may suffer from starvation by a
+     * real-time process. Our system scheduler isn't fair anymore, so we need
+     * to get a little sophisticated here.
+     *
+     * Worst case: we compute the expiration time, and then get preempted. It
+     * is possible that we have to wait for a few seconds before we can start
+     * our hardware transfer. Thus, our timeout may have expired well before
+     * the slave got the chance to take note of our attempt at communication.
+     * It may not have been ready to send anything, so we would run into the
+     * timeout after a single try.
+     *
+     * Second worst case: we get preempted before checking our timeout for the
+     * first time. Again, the timeout would be exceeded after a single try.
+     *
+     * To make our communication more robust, we make sure the first iteration
+     * has been executed and the SPI slave knows that we are communicating
+     * before we consider any timeouts. Then we compute the expiration time,
+     * and allow the timeout to expire at least 2 times so that the slave got a
+     * real chance for sending data. The jitter for the observed total timeout
+     * depends on the duration of the partial timeouts.
+     */
+    unsigned int expirations_left = spi_wait_for_slave_timeout_max_iterations + 1;
     struct timespec expiration_time;
-    compute_expiration_time(&expiration_time, timeout_ms);
+    compute_expiration_time(&expiration_time, 0);
 
     while(1)
     {
@@ -224,14 +271,14 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
         }
 
         /* only NOPs, try again if we are within the specified timeout... */
-        struct timespec current_time;
-        os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-
-        if(timeout_expired(&expiration_time, &current_time))
+        bool need_recompute_timeout = false;
+        if(has_timeout_expired(&expiration_time, &expirations_left,
+                               &need_recompute_timeout))
         {
             msg_error(0, LOG_NOTICE,
                       "SPI write timeout, slave didn't get ready within %u ms",
-                      timeout_ms);
+                      spi_wait_for_slave_timeout_max_iterations *
+                      spi_wait_for_slave_timeout_ms);
             return SPI_SEND_RESULT_TIMEOUT;
         }
 
@@ -240,8 +287,11 @@ wait_for_spi_slave(int fd, unsigned int timeout_ms,
         {
             .tv_nsec = 5L * 1000L * 1000L,
         };
-
         os_nanosleep(&delay_between_slave_ready_probes);
+
+        if(need_recompute_timeout)
+            compute_expiration_time(&expiration_time,
+                                    spi_wait_for_slave_timeout_ms);
     }
 }
 
@@ -272,7 +322,7 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
 static struct spi_input_buffer global_spi_input_buffer;
 
 enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
-                                   unsigned int timeout_ms, struct stats_io *io)
+                                   struct stats_io *io)
 {
     if(fd < 0)
     {
@@ -283,8 +333,7 @@ enum SpiSendResult spi_send_buffer(int fd, const uint8_t *buffer, size_t length,
     uint8_t poll_bytes_buffer[sizeof(spi_dummy_bytes) > 2 ? 2 : sizeof(spi_dummy_bytes)];
     bool have_significant_data;
     const enum SpiSendResult wait_result =
-        wait_for_spi_slave(fd, timeout_ms,
-                           poll_bytes_buffer, sizeof(poll_bytes_buffer),
+        wait_for_spi_slave(fd, poll_bytes_buffer, sizeof(poll_bytes_buffer),
                            &have_significant_data, io);
 
     if(wait_result != SPI_SEND_RESULT_OK)
@@ -434,11 +483,16 @@ static size_t consume_from_buffer(struct spi_input_buffer *const restrict src,
 }
 
 ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
-                        unsigned int timeout_ms, struct stats_io *io)
+                        struct stats_io *io)
 {
-    bool reset_timeout = false;
+    /*
+     * Please read the comment in #wait_for_spi_slave() for why we are using a
+     * non-obvious timeout strategy.
+     */
+    bool need_recompute_timeout = false;
+    unsigned int expirations_left = spi_read_from_slave_timeout_max_iterations + 1;
     struct timespec expiration_time;
-    compute_expiration_time(&expiration_time, timeout_ms);
+    compute_expiration_time(&expiration_time, 0);
 
     /* first consume bytes from the buffer, if any */
     size_t output_buffer_pos =
@@ -462,23 +516,31 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         /* slave not ready, try again... */
         if(chunk_size == 0)
         {
-            struct timespec current_time;
-            os_clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-
-            if(timeout_expired(&expiration_time, &current_time))
+            if(!need_recompute_timeout &&
+               has_timeout_expired(&expiration_time, &expirations_left,
+                                   &need_recompute_timeout))
             {
                 msg_error(0, LOG_NOTICE,
                           "SPI read timeout, returning %zu of %zu bytes",
                           output_buffer_pos, length);
+                if(output_buffer_pos > 0)
+                    hexdump_to_log(MESSAGE_LEVEL_NORMAL, buffer,
+                                   output_buffer_pos, "Partial buffer");
                 break;
             }
 
-            if(reset_timeout)
+            /* give the slave (and ourselves) a break */
+            static const struct timespec delay_between_slave_reads =
             {
-                /* got something, do not consider timeout anymore for fast
-                 * failure when necessary */
-                expiration_time = current_time;
-                reset_timeout = false;
+                .tv_nsec = 5L * 1000L * 1000L,
+            };
+            os_nanosleep(&delay_between_slave_reads);
+
+            if(need_recompute_timeout)
+            {
+                compute_expiration_time(&expiration_time,
+                                        spi_read_from_slave_timeout_ms);
+                need_recompute_timeout = false;
             }
 
             continue;
@@ -487,7 +549,8 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         /* got something */
         log_assert((size_t)chunk_size <= sizeof(global_spi_input_buffer.buffer));
 
-        reset_timeout = true;
+        need_recompute_timeout = true;
+        expirations_left = spi_read_from_slave_timeout_max_iterations;
 
         global_spi_input_buffer.buffer_pos += chunk_size;
         output_buffer_pos +=

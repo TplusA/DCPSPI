@@ -49,6 +49,8 @@ void hexdump_to_log(enum MessageVerboseLevel level,
 namespace complete_tests
 {
 
+static constexpr unsigned long delay_between_slave_probes_ms = 5;
+
 class PollResult
 {
   private:
@@ -2267,6 +2269,10 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
 
+    mock_messages->check();
+    mock_gpio->check();
+    mock_os->check();
+
     /* we know there is (or at least, was) a pending request and we are going
      * to process it */
     cppcut_assert_equal(TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE, process_data->transaction.state);
@@ -2287,13 +2293,32 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
                                                         spi_rw_data_t::EXPECT_READ_NOPS,
                                                         false);
     mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
-    static constexpr int timeout_seconds = 5;
-    static const struct timespec expired_time =
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
+    mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+    mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, dummy_time);
+
+    /* expire multiple timeouts */
+    struct timespec expired_time = dummy_time;
+    for(int i = 0; i < 4; ++i)
     {
-        .tv_sec = dummy_time.tv_sec + timeout_seconds,
-        .tv_nsec = dummy_time.tv_nsec,
-    };
+        spi_rw_data->set<read_from_slave_spi_transfer_size>(
+                                            spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                            spi_rw_data_t::EXPECT_READ_NOPS,
+                                            false);
+        mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+        ++expired_time.tv_sec;
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, expired_time);
+        mock_os->expect_os_nanosleep(0, delay_between_slave_probes_ms);
+        mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, expired_time);
+    }
+    spi_rw_data->set<read_from_slave_spi_transfer_size>(
+                                            spi_rw_data_t::EXPECT_WRITE_NOPS,
+                                            spi_rw_data_t::EXPECT_READ_NOPS,
+                                            false);
+    mock_spi_hw->expect_spi_hw_do_transfer_callback(mock_spi_transfer);
+    ++expired_time.tv_sec;
     mock_os->expect_os_clock_gettime(0, 0, CLOCK_MONOTONIC_RAW, expired_time);
+
     mock_messages->expect_msg_error_formatted(0, LOG_NOTICE,
         "SPI read timeout, returning 0 of 4 bytes");
     mock_messages->expect_msg_vinfo_formatted(MESSAGE_LEVEL_DEBUG,
@@ -2302,6 +2327,9 @@ void test_lost_transaction_and_timeout_if_slave_deasserts_request_line_too_soon(
     cut_assert_true(dcpspi_process(expected_fifo_in_fd, expected_fifo_out_fd,
                                    expected_spi_fd, &process_data->transaction,
                                    &process_data->rldata));
+    mock_messages->check();
+    mock_gpio->check();
+    mock_os->check();
 
     expect_no_more_actions();
 }
