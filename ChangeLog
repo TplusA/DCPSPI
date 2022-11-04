@@ -1,3 +1,10 @@
+2022-11-10  Robert Tiemann  <r.tiemann@ta-hifi.de>
+
+	* Version 3.4 released.
+
+	* SPI: Improve timeout strategy so that only multiple failures lead to
+	  a real timeout.
+
 2022-10-28  Robert Tiemann  <r.tiemann@ta-hifi.de>
 
 	* Version 3.3 released.
