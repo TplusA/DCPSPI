@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019  T+A elektroakustik GmbH & Co. KG
+# Copyright (C) 2019, 2022  T+A elektroakustik GmbH & Co. KG
 #
 # This file is part of DCPSPI.
 #
@@ -36,6 +36,7 @@ cutter_wrap_args = [
 
 spi_tests = shared_module('test_spi',
     ['test_spi.cc', 'mock_os.cc', 'mock_messages.cc', 'mock_spi_hw.cc'],
+    cpp_args: '-Wno-pedantic',
     include_directories: ['..'],
     dependencies: cutter_dep,
     link_with: [spi_lib, statistics_lib],
@@ -48,6 +49,7 @@ test('SPI low level',
 
 complete_tests = shared_module('test_complete',
     ['test_complete.cc', 'mock_os.cc', 'mock_messages.cc', 'mock_spi_hw.cc', 'mock_gpio.cc'],
+    cpp_args: '-Wno-pedantic',
     include_directories: ['..'],
     dependencies: cutter_dep,
     link_with: [dcpspi_lib, spi_lib, statistics_lib],
@@ -60,6 +62,7 @@ test('Complete transfers',
 
 statistics_tests = shared_module('test_statistics',
     ['test_statistics.cc', 'mock_os.cc', 'mock_messages.cc'],
+    cpp_args: '-Wno-pedantic',
     include_directories: ['..'],
     dependencies: cutter_dep,
     link_with: statistics_lib,
