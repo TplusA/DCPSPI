@@ -305,8 +305,8 @@ static void handle_collision(uint8_t *const poll_bytes_buffer,
                                            &pending_escape_sequence);
 
     if(in->buffer_pos > 0)
-        BUG("Discarding %zu bytes from SPI receive buffer after collision",
-            in->buffer_pos);
+        MSG_BUG("Discarding %zu bytes from SPI receive buffer after collision",
+                in->buffer_pos);
 
     if(bytes_left > 0)
     {
@@ -500,7 +500,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
 
     while(output_buffer_pos < length)
     {
-        log_assert(global_spi_input_buffer.buffer_pos == 0);
+        msg_log_assert(global_spi_input_buffer.buffer_pos == 0);
 
         /* read a few bytes from SPI into our buffer (with escape characters
          * removed); keep them around for potential extra bytes that have been
@@ -547,7 +547,7 @@ ssize_t spi_read_buffer(int fd, uint8_t *buffer, size_t length,
         }
 
         /* got something */
-        log_assert((size_t)chunk_size <= sizeof(global_spi_input_buffer.buffer));
+        msg_log_assert((size_t)chunk_size <= sizeof(global_spi_input_buffer.buffer));
 
         need_recompute_timeout = true;
         expirations_left = spi_read_from_slave_timeout_max_iterations;

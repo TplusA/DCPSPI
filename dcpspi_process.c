@@ -217,7 +217,7 @@ bool reset_transaction_struct(struct dcp_transaction *transaction,
         break;
 
       case REQSTATE_LOCKED:
-        BUG("Reset locked transaction, chaos expected");
+        MSG_BUG("Reset locked transaction, chaos expected");
         return true;
 
       case REQSTATE_NEXT_PENDING:
@@ -517,8 +517,8 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
             return true;
 
           case REQSTATE_NEXT_PENDING:
-            BUG("Invalid request state %d for idle transaction",
-                transaction->request_state);
+            MSG_BUG("Invalid request state %d for idle transaction",
+                    transaction->request_state);
             return false;
         }
 
@@ -578,11 +578,11 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
         }
         else
         {
-            BUG("Unexpected DCPSYNC command 0x%02x for packet serial 0x%04x "
-                "with ttl %u, skipping %u bytes",
-                get_dcpsync_command(transaction->dcp_buffer.buffer),
-                transaction->serial, transaction->ttl,
-                transaction->pending_size_of_transaction);
+            MSG_BUG("Unexpected DCPSYNC command 0x%02x for packet serial 0x%04x "
+                    "with ttl %u, skipping %u bytes",
+                    get_dcpsync_command(transaction->dcp_buffer.buffer),
+                    transaction->serial, transaction->ttl,
+                    transaction->pending_size_of_transaction);
 
             if(transaction->pending_size_of_transaction > 0)
                 transaction->state = TR_MASTER_COMMAND_SKIPPING_DATA_FROM_DCPD;
@@ -595,7 +595,7 @@ static bool do_process_transaction(struct dcp_transaction *transaction,
         /* fall-through */
 
       case TR_MASTER_COMMAND_FORWARDING_TO_SLAVE:
-        log_assert(transaction->pending_size_of_transaction == 0);
+        msg_log_assert(transaction->pending_size_of_transaction == 0);
 
         clear_buffer(&transaction->spi_buffer);
 
@@ -797,8 +797,8 @@ static bool process_request_line(struct dcp_transaction *transaction,
 
     if(!current_gpio_state &&
        transaction->state == TR_SLAVE_COMMAND_RECEIVING_HEADER_FROM_SLAVE)
-        APPLIANCE_BUG("Transaction was requested by slave, but request pin is deasserted now. "
-                      "We will try to process this pending transaction anyway.");
+        MSG_APPLIANCE_BUG("Transaction was requested by slave, but request pin is deasserted now. "
+                          "We will try to process this pending transaction anyway.");
 
     bool processing = true;
 
@@ -839,16 +839,16 @@ static bool process_request_line(struct dcp_transaction *transaction,
               case REQSTATE_LOCKED:
                 transaction->request_state = REQSTATE_NEXT_PENDING;
 
-                BUG("Slave request while processing locked transaction 0x%04x",
-                    transaction->serial);
+                MSG_BUG("Slave request while processing locked transaction 0x%04x",
+                        transaction->serial);
 
                 break;
 
               case REQSTATE_NEXT_PENDING:
                 transaction->request_state = REQSTATE_MISSED;
 
-                BUG("Slave request while processing transaction 0x%04x with pending transaction",
-                    transaction->serial);
+                MSG_BUG("Slave request while processing transaction 0x%04x with pending transaction",
+                        transaction->serial);
 
                 break;
             }
@@ -889,22 +889,22 @@ static bool process_request_line(struct dcp_transaction *transaction,
                 break;
 
               case REQSTATE_IDLE:
-                BUG("Deasserted idle transaction 0x%04x", transaction->serial);
+                MSG_BUG("Deasserted idle transaction 0x%04x", transaction->serial);
 
                 break;
 
               case REQSTATE_RELEASED:
                 transaction->state = TR_IDLE;
 
-                BUG("Deasserted released transaction 0x%04x", transaction->serial);
+                MSG_BUG("Deasserted released transaction 0x%04x", transaction->serial);
 
                 break;
 
               case REQSTATE_MISSED:
                 transaction->state = TR_IDLE;
 
-                BUG("Deasserted released transaction 0x%04x with lost transaction request(s)",
-                    transaction->serial);
+                MSG_BUG("Deasserted released transaction 0x%04x with lost transaction request(s)",
+                        transaction->serial);
 
                 break;
             }
@@ -934,7 +934,7 @@ static bool wait_for_events(const struct dcp_transaction *const transaction,
     }
 
     if(gpio_fd < 0 && fifo_in_fd < 0)
-        BUG("No fds to wait for");
+        MSG_BUG("No fds to wait for");
 
     fds[0].fd = gpio_fd;
     fds[0].events = POLLPRI | POLLERR;
